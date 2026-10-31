@@ -1,111 +1,69 @@
 # Edutrack
 
-Edutrack is a mobile-first college attendance and academic management app built with vanilla HTML, CSS, and JavaScript, a Cloudflare Worker API, and Cloudflare D1. The original `Attendance Sheet - College Edition.html` is preserved in the project; the new site is served from `public/`.
+Edutrack is a mobile-first attendance and academic management app. The public site uses ordinary HTML, CSS, and JavaScript. A Cloudflare Worker serves the site and API; Cloudflare D1 stores college data. The Worker and GitHub project use the technical name `edunest`; the visible product is Edutrack.
 
-## What is included
+## Current features
 
-- Separate OWNER, MODERATOR, and STUDENT sign-in and dashboards.
-- Server-side roles, per-moderator global or subject permissions, session expiry and revocation, CSRF and same-origin checks, password hashing, hashed cookie sessions, and a database-backed login throttle.
-- Private student sign-in with username, password, and a one-time-issued individual access code. Codes are hashed in D1 and displayed only when created or rotated.
-- Owner tools for student CSV import/export, one-time access-code issue/revocation, moderator management, and attendance report export. The import template is downloadable from the Students page.
-- Student profile, enrollment, subject, attendance, routine, holiday, reporting, and audit-log database tables with foreign keys and indexes.
-- Academic session creation and editing; creating a session makes it active and archives the previous active session.
-- A partial unique index and triggers to protect the single OWNER and limit active moderators to five.
-- Owner recovery using a separately stored recovery secret.
-- Student dashboards that only request their own academic records.
-- Attendance entry that requires a mark for every enrolled student and blocks holidays unless the OWNER confirms and audits an override.
-- Timetable versions with effective dates and period-overlap checks.
-- Responsive light/dark styling based on the supplied attendance sheet.
+- Owner sign-in, college registration, and one shared student/moderator sign-in. The server reads the role from the stored account.
+- One OWNER per college and up to five active MODERATOR accounts per college.
+- Per-college students, academic records, permissions, attendance, routines, holidays, reports, and audit entries.
+- Individual student access codes, stored as password hashes, with owner rotation and revocation.
+- Session cookies, CSRF and origin checks, password hashing, and sign-in/registration throttling.
+- Attendance entry and correction, academic sessions, student import/export, timetable versions, holiday overrides, and read-only student dashboards.
 
-The pasted development prompt ends partway through the Android/iPhone/PC checklist. The implementation covers the complete requirements visible before that cutoff. This project has not been deployed to a Cloudflare account and has no Cloudflare D1 database ID yet.
+## Existing database and migration
 
-## Before you start
+`wrangler.toml` is already configured with the existing D1 database `college-attendance`, binding `DB`, and the existing database ID. Keep that configuration. Do not run `wrangler d1 create` or replace the database.
 
-Install a current Node.js LTS release and create a Cloudflare account. Create a GitHub repository for this folder if you want automatic deployments. Keep `.dev.vars`, passwords, setup/recovery secrets, and account credentials out of GitHub.
+The remote database schema was inspected read-only. Migration `0001_initial.sql` is already applied. `0002_college_tenants.sql` adds a `colleges` table and college IDs to existing records, then assigns existing records to an “Existing College” workspace. It does not delete records or tables. The old global OWNER and active academic-session indexes are replaced with per-college indexes. The subject uniqueness index is also college-scoped.
 
-## Local setup on Windows
+The original schema has some inline global uniqueness constraints that cannot be changed without rebuilding tables. To honor the requirement not to drop or rebuild existing tables, usernames, department names, academic-session names, roll numbers, and registration numbers remain globally unique. This can prevent two colleges from reusing those exact values, even though their records and API access are isolated by college. This is a known limitation of the current safe migration.
 
-1. Open PowerShell in this project folder and install Wrangler:
-
-   ```powershell
-   npm install
-   ```
-
-2. Create a local secrets file. Copy `.dev.vars.example` to `.dev.vars` and replace both example values with long, unique random secrets. The `.dev.vars` file is ignored by Git.
-
-3. Apply the schema to the local D1 database and start the app:
-
-   ```powershell
-   npm run db:local
-   npm run dev
-   ```
-
-4. Open the local address printed by Wrangler. The first-time owner form appears only while the OWNER table is empty and `OWNER_SETUP_KEY` is configured. Use the matching value from `.dev.vars`. Create a long owner password and store the `OWNER_RECOVERY_KEY` somewhere offline.
-
-5. After setup, remove `OWNER_SETUP_KEY` from `.dev.vars` so the setup form and endpoint are disabled. Keep the recovery secret in a secure offline location.
-
-## Create the production D1 database
-
-Run these commands after logging into Wrangler:
+Before applying a production migration, check the D1 storage version and recovery point. From this project folder, run:
 
 ```powershell
-npx wrangler login
-npx wrangler d1 create college-attendance
-```
-
-Copy the `database_id` Wrangler returns into `wrangler.toml`, replacing `REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID`. The Worker binding is named `DB`; the D1 database is named `college-attendance`.
-
-Apply the migration to Cloudflare D1:
-
-```powershell
+npx wrangler d1 info college-attendance
+npx wrangler d1 time-travel info college-attendance
 npm run db:remote
 ```
 
-Set production secrets through Wrangler. Use different values for the first-owner setup and recovery secrets:
+For a database whose `version` is `production`, D1 Time Travel is enabled automatically; record the bookmark printed by the second command before proceeding. Wrangler captures a backup after applying migrations and rolls back a migration that fails. If `version` is `alpha`, follow Cloudflare's legacy D1 backup process instead; Time Travel is not available for that storage version. Do not paste the migration into the D1 console, because Wrangler tracks migration history. This project has not applied migration `0002` to the remote database.
+
+If the migration succeeds but must be rolled back, stop application writes and restore the production database to the recorded pre-migration bookmark:
 
 ```powershell
-npx wrangler secret put OWNER_SETUP_KEY
-npx wrangler secret put OWNER_RECOVERY_KEY
+npx wrangler d1 time-travel restore college-attendance --bookmark=<PRE_MIGRATION_BOOKMARK>
 ```
 
-Deploy the Worker:
+This restore overwrites the database in place. It also removes writes made after that bookmark, so use it only after confirming the impact. Wrangler prints a bookmark for the state immediately before restore, which can be used to undo the restore if needed. D1 Time Travel retention is limited (7 days on Workers Free, 30 days on Workers Paid); keep a separate export for longer retention.
 
-```powershell
-npm run deploy
-```
+Apply the migration before deploying the updated Worker. A GitHub-connected Worker deploys code, but the D1 migration remains a separate step unless the Cloudflare build is explicitly configured to run it.
 
-Open the deployed site, create the first OWNER, then disable first-time setup:
+## Local development
 
-```powershell
-npx wrangler secret delete OWNER_SETUP_KEY
-```
+1. Install a current Node.js LTS release and run `npm install`.
+2. Copy `.dev.vars.example` to `.dev.vars` and use a long random `OWNER_RECOVERY_KEY` if you need recovery for the existing legacy OWNER.
+3. Run `npm run db:local`, then `npm run dev`.
+4. Open the address Wrangler prints. Register a college in the sign-in page. The first OWNER recovery code is shown once after registration; save it securely.
 
-Keep `OWNER_RECOVERY_KEY` configured. To recover the owner account, use **Owner account recovery** on the sign-in page with that secret and a new password. Recovery revokes existing owner sessions. Rotate the recovery secret if it is exposed.
+New colleges store their own recovery-code hash in D1. `OWNER_RECOVERY_KEY` is retained only as a recovery fallback for the original legacy OWNER. The old first-owner setup endpoint and setup secret are no longer used.
 
-## Automatic deployment from GitHub
+## Sign-in and data isolation
 
-Cloudflare Workers Builds supports connecting a GitHub repository and deploying on pushes. In the Cloudflare dashboard, create or open the `edutrack` Worker, connect this GitHub repository, and set the repository root to this project. The Wrangler `name` must match the Worker name. Set the production secrets and D1 binding in the Cloudflare dashboard or keep the binding in `wrangler.toml`; deploy the D1 migration separately before the first app use. The default Wrangler deploy command is sufficient; the project also supplies `npm run deploy`.
+- Owners sign in from **OWNER SIGN IN**. A new college uses **REGISTER COLLEGE**.
+- Students and moderators use **STUDENT / MODERATOR**. Students enter their individual access code; moderators leave that field empty.
+- The UI does not send a role claim. The Worker authenticates the account and selects the role from D1.
+- Authenticated API requests are scoped from the college ID stored with the user and session. The database also rejects cross-college references when records are created.
+- The migrated legacy workspace is named “Existing College” until its OWNER changes the college name under the Security section.
 
-Cloudflare Workers can serve the `public/` files and run the API Worker on every request; the Worker forwards static requests through the `ASSETS` binding. D1 migrations are tracked in `migrations/0001_initial.sql`.
+## Deployment
 
-## Current API areas
+The Wrangler project name is `edunest`, the D1 binding is `DB`, and the configured timezone is `Asia/Kolkata`. Connect the repository to Cloudflare Workers Builds if automatic GitHub deployment is desired. Apply the D1 migration once before the updated Worker handles production traffic. Use the existing database and binding.
 
-- `/api/login`, `/api/logout`, `/api/me`, `/api/setup/owner`, `/api/setup/recover-owner`
-- `/api/students`, `/api/moderators`, `/api/academics`, `/api/departments`, `/api/branches`, `/api/courses`, `/api/subjects`, `/api/sessions`, `/api/enrollments`
-- `/api/attendance/*`, `/api/routines*`, `/api/holidays*`, `/api/reports`, `/api/audit`
+The supplied project folder has no `.git` metadata, so GitHub connection status cannot be determined from this folder. The original `Attendance Sheet - College Edition.html` is retained; the served application is in `public/`.
 
-All D1 SQL values are bound parameters. Client-supplied role and student IDs are not used to authorize a student data request; the student identity comes from the authenticated session.
+## Security notes
 
-## Important deployment notes
-
-- Do not commit actual D1 IDs from other environments, Cloudflare secrets, or real student data.
-- Do not reuse the example secret values. Set random secrets with Cloudflare or generate them locally.
-- The initial OWNER recovery secret is a high-value credential; keep it in an approved password manager or offline vault.
-- Before handling real student data, review the implementation with your institution’s security/privacy requirements and run deployment-level checks in your Cloudflare account. This repository alone cannot prove that a live deployment is secure.
-- The initial pasted prompt was truncated at its final mobile-support bullet, so any requirements after the visible text were unavailable.
-
-## References
-
-- [Cloudflare Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/)
-- [Cloudflare D1 migrations and Wrangler commands](https://developers.cloudflare.com/d1/wrangler-commands/)
-- [Cloudflare Workers Builds with GitHub](https://developers.cloudflare.com/workers/ci-cd/builds/git-integration/github-integration/)
+- Never commit `.dev.vars`, real student data, or recovery codes.
+- The production database and deployment were not modified as part of this code update.
+- The pasted development prompt ended mid-sentence after “Never ask me to delete tab”; requirements after that point were not available.
