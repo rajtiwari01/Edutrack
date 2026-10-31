@@ -1,9 +1,9 @@
 import { tenantDatabase } from './tenant.js';
-import { pbkdf2 } from 'node:crypto';
 
 const COOKIE='edutrack_session';
 const SESSION_HOURS=12;
-const PASSWORD_ITERATIONS=310000;
+// Cloudflare Workers rejects PBKDF2 calls above 100,000 iterations.
+const PASSWORD_ITERATIONS=100000;
 const VALID_PERMISSIONS=new Set(['view_attendance','mark_attendance','edit_attendance','view_assigned_subjects','manage_assigned_subjects','view_assigned_classes','view_student_info','view_attendance_history','view_routines','manage_routines','view_holidays']);
 const UUID=()=>crypto.randomUUID();
 
@@ -22,9 +22,9 @@ const toB64=b=>btoa(String.fromCharCode(...new Uint8Array(b)));
 const fromB64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
 async function sha256(text){return toB64(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)))}
 async function constantEqual(a,b){if(typeof a!=='string'||typeof b!=='string')return false;const [x,y]=await Promise.all([sha256(a),sha256(b)]);let diff=0;for(let i=0;i<x.length;i++)diff|=x.charCodeAt(i)^y.charCodeAt(i);return diff===0}
-function derivePasswordBits(password,salt,iterations){return new Promise((resolve,reject)=>pbkdf2(password,salt,iterations,32,'sha256',(error,bits)=>error?reject(error):resolve(bits)))}
+async function derivePasswordBits(password,salt,iterations){const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveBits']);return new Uint8Array(await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt:new Uint8Array(salt),iterations},key,256))}
 async function passwordHash(password){const salt=randomBytes(16),bits=await derivePasswordBits(password,salt,PASSWORD_ITERATIONS);return `pbkdf2-sha256$${PASSWORD_ITERATIONS}$${toB64(salt)}$${toB64(bits)}`}
-async function verifyPassword(password,encoded){try{const [label,iterationsText,salt,expected]=encoded.split('$'),iterations=Number(iterationsText);if(label!=='pbkdf2-sha256'||!Number.isSafeInteger(iterations)||iterations<1||iterations>1000000)return false;const bits=await derivePasswordBits(password,fromB64(salt),iterations);return constantEqual(toB64(bits),expected)}catch{return false}}
+async function verifyPassword(password,encoded){try{const [label,iterationsText,salt,expected]=encoded.split('$'),iterations=Number(iterationsText);if(label!=='pbkdf2-sha256'||!Number.isSafeInteger(iterations)||iterations<1||iterations>100000)return false;const bits=await derivePasswordBits(password,fromB64(salt),iterations);return constantEqual(toB64(bits),expected)}catch{return false}}
 function generateAccessCode(){const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';const bytes=randomBytes(20);let bits=0,buffer=0,out='';for(const byte of bytes){buffer=(buffer<<8)|byte;bits+=8;while(bits>=5){out+=alphabet[(buffer>>(bits-5))&31];bits-=5}}if(bits)out+=alphabet[(buffer<<(5-bits))&31];return out.match(/.{1,4}/g).join('-')}
 function generateRecoveryCode(){return toB64(randomBytes(32)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'')}
 function cookieToken(request){const raw=request.headers.get('Cookie')||'';for(const part of raw.split(';')){const [key,...rest]=part.trim().split('=');if(key===COOKIE)return decodeURIComponent(rest.join('='))}return''}
