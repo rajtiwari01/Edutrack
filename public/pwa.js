@@ -1,72 +1,113 @@
 (() => {
-  const installButton = document.getElementById('install-app');
-  const helpDialog = document.getElementById('install-help');
-  const instructions = document.getElementById('install-instructions');
-  const dismissedKey = 'edutrack-install-dismissed-until';
-  let installPrompt = null;
+  const installButton = document.querySelector('#install-app');
+  const installDialog = document.querySelector('#install-dialog');
+  let deferredInstall = null;
+  let installedThisSession = false;
+  const dismissalKey = 'edutrack:pwa-install-dismissed-until';
 
-  const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-  const isIOS = () => /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  const dismissed = () => {
-    try { return Number(localStorage.getItem(dismissedKey) || 0) > Date.now(); } catch { return false; }
-  };
-  const setDismissed = () => {
-    try { localStorage.setItem(dismissedKey, String(Date.now() + 7 * 24 * 60 * 60 * 1000)); } catch {}
-  };
+  function isStandalone() {
+    return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  }
 
-  if (installButton && !isStandalone() && !dismissed()) installButton.hidden = false;
-
-  window.addEventListener('beforeinstallprompt', (event) => {
-    event.preventDefault();
-    installPrompt = event;
-    if (installButton && !dismissed()) {
-      installButton.hidden = false;
-      installButton.textContent = 'Install';
+  function dismissedRecently() {
+    try {
+      return Number(localStorage.getItem(dismissalKey) || 0) > Date.now();
+    } catch {
+      return false;
     }
-  });
+  }
 
-  window.addEventListener('appinstalled', () => {
-    installPrompt = null;
-    if (installButton) installButton.hidden = true;
-  });
+  function updateInstallButton() {
+    if (!installButton) return;
+    installButton.hidden = installedThisSession || isStandalone() || dismissedRecently();
+  }
 
-  function showInstructions() {
-    if (!instructions || !helpDialog) return;
-    if (isIOS()) {
-      instructions.textContent = 'In Safari, tap the Share button, scroll the menu, then tap “Add to Home Screen”. Confirm the name and tap Add.';
-    } else if (/Android/i.test(navigator.userAgent)) {
-      instructions.textContent = 'In your browser menu, choose “Install app” or “Add to Home screen”, then confirm.';
-    } else {
-      instructions.textContent = 'In your browser menu, choose “Install Edutrack” or “Install this site as an app”. The wording varies by browser.';
-    }
-    if (!helpDialog.open) helpDialog.showModal();
+  function showInstallInstructions() {
+    const isAppleMobile = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const isAppleBrowser = isAppleMobile && /Safari/.test(navigator.userAgent) && !/CriOS|FxiOS|EdgiOS/.test(navigator.userAgent);
+    const instructions = isAppleMobile
+      ? (isAppleBrowser
+        ? 'In Safari, tap Share, then choose Add to Home Screen.'
+        : 'Open Edutrack in Safari, tap Share, then choose Add to Home Screen.')
+      : /Android/.test(navigator.userAgent)
+        ? 'Open your browser menu and choose Install app or Add to Home screen.'
+        : 'Use the install icon in your browser address bar, or choose Install Edutrack from the browser menu.';
+    installDialog.innerHTML = `<div class="dialog-inner"><div class="dialog-head"><h2 id="install-dialog-title">Install Edutrack</h2><button type="button" class="icon-button" data-install-close aria-label="Close installation instructions">×</button></div><div class="dialog-content"><p class="subtle">Add Edutrack to your device for a clean, app-like shortcut.</p><p class="install-instructions">${instructions}</p></div><div class="dialog-actions"><button type="button" class="button primary" data-install-close>Got it</button></div></div>`;
+    installDialog.showModal();
   }
 
   installButton?.addEventListener('click', async () => {
-    if (!installPrompt) {
-      showInstructions();
+    if (!deferredInstall) {
+      showInstallInstructions();
       return;
     }
-    installButton.disabled = true;
-    try {
-      await installPrompt.prompt();
-      const choice = await installPrompt.userChoice;
-      if (choice?.outcome === 'dismissed') setDismissed();
-      if (choice?.outcome === 'accepted') installButton.hidden = true;
-    } catch {
-      showInstructions();
-    } finally {
-      installPrompt = null;
-      installButton.disabled = false;
-      if (dismissed()) installButton.hidden = true;
+    const promptEvent = deferredInstall;
+    await promptEvent.prompt();
+    const choice = await promptEvent.userChoice;
+    deferredInstall = null;
+    if (choice?.outcome === 'dismissed') {
+      try {
+        localStorage.setItem(dismissalKey, String(Date.now() + 30 * 24 * 60 * 60 * 1000));
+      } catch {
+        // A missing preference store must not block installation.
+      }
     }
+    updateInstallButton();
   });
 
-  helpDialog?.querySelectorAll('[data-install-close]').forEach((button) => {
-    button.addEventListener('click', () => helpDialog.close());
+  installDialog?.addEventListener('click', event => {
+    if (event.target.matches('[data-install-close]')) installDialog.close();
   });
+  window.addEventListener('beforeinstallprompt', event => {
+    event.preventDefault();
+    deferredInstall = event;
+    updateInstallButton();
+  });
+  window.addEventListener('appinstalled', () => {
+    deferredInstall = null;
+    installedThisSession = true;
+    try { localStorage.removeItem(dismissalKey); } catch { /* Optional preference only. */ }
+    updateInstallButton();
+  });
+  updateInstallButton();
 
-  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
-    navigator.serviceWorker.register('/service-worker.js', { scope: '/' }).catch(() => {});
+  function addPasswordToggles(root) {
+    for (const input of root.querySelectorAll('input[type="password"]:not([data-password-enhanced])')) {
+      const wrapper = document.createElement('span');
+      wrapper.className = 'password-control';
+      input.dataset.passwordEnhanced = 'true';
+      input.parentNode.insertBefore(wrapper, input);
+      wrapper.append(input);
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'password-toggle';
+      toggle.textContent = 'Show';
+      toggle.setAttribute('aria-label', 'Show password');
+      toggle.setAttribute('aria-pressed', 'false');
+      toggle.addEventListener('click', () => {
+        const show = input.type === 'password';
+        input.type = show ? 'text' : 'password';
+        toggle.textContent = show ? 'Hide' : 'Show';
+        toggle.setAttribute('aria-label', `${show ? 'Hide' : 'Show'} password`);
+        toggle.setAttribute('aria-pressed', String(show));
+        input.focus();
+      });
+      wrapper.append(toggle);
+    }
+  }
+
+  addPasswordToggles(document);
+  new MutationObserver(records => {
+    for (const record of records) {
+      for (const node of record.addedNodes) {
+        if (node.nodeType === Node.ELEMENT_NODE) addPasswordToggles(node);
+      }
+    }
+  }).observe(document.body, { childList: true, subtree: true });
+
+  if ('serviceWorker' in navigator && window.isSecureContext) {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {
+      // Installation remains available without offline shell support.
+    });
   }
 })();

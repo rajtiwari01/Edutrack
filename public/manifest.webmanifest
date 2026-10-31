@@ -6,12 +6,28 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "orientation": "any",
-  "background_color": "#f4f7fb",
-  "theme_color": "#1477f2",
+  "theme_color": "#1757b7",
+  "background_color": "#f3f6fb",
   "icons": [
-    { "src": "/icons/edutrack-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "/icons/edutrack-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "/icons/edutrack-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "/icons/edutrack-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/edutrack-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/edutrack-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
   ]
 }
