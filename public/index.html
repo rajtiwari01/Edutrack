@@ -3,19 +3,36 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#007aff">
+  <meta name="theme-color" content="#1477f2">
   <meta name="description" content="Edutrack college attendance and academic management">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Edutrack">
   <title>Edutrack — College Attendance</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="/icons/edutrack-icon.svg">
+  <link rel="apple-touch-icon" href="/icons/edutrack-180.png">
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/experience.css">
   <script src="/app.js" defer></script>
+  <script src="/experience.js" defer></script>
+  <script src="/routine-ui.js" defer></script>
+  <script src="/pwa.js" defer></script>
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="/" aria-label="Edutrack home"><span class="brand-mark">🎓</span><span><b>Edutrack</b><small>College attendance</small></span></a>
-    <div class="top-actions"><span id="identity" class="identity" hidden></span><button id="logout" class="button quiet" hidden>Log out</button><button id="theme-toggle" class="icon-button" aria-label="Toggle theme">◐</button></div>
+    <a class="brand" href="/" aria-label="Edutrack home"><span class="brand-mark"><img src="/icons/edutrack-icon.svg" alt="" width="42" height="42"></span><span class="brand-copy"><b>Edutrack</b><small id="college-name">College attendance</small></span></a>
+    <div class="top-actions"><span id="identity" class="identity" hidden></span><button id="install-app" class="button soft install-button" type="button" hidden>Install</button><button id="logout" class="button quiet" hidden>Log out</button><button id="theme-toggle" class="icon-button" aria-label="Toggle theme">◐</button></div>
   </header>
   <main id="app" class="page" aria-live="polite"><div class="loading"><span class="spinner"></span><span>Loading Edutrack…</span></div></main>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <dialog id="dialog" class="dialog"></dialog>
+  <dialog id="install-help" class="dialog install-dialog" aria-labelledby="install-help-title">
+    <div class="dialog-inner">
+      <div class="dialog-head"><h2 id="install-help-title">Install Edutrack</h2><button class="icon-button" type="button" data-install-close aria-label="Close install instructions">×</button></div>
+      <p id="install-instructions" class="install-instructions"></p>
+      <div class="dialog-actions"><button class="button primary" type="button" data-install-close>Done</button></div>
+    </div>
+  </dialog>
 </body>
 </html>
