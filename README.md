@@ -1,84 +1,41 @@
 # Edutrack
 
-Edutrack is a mobile-first attendance and academic management app. The public site uses ordinary HTML, CSS, and JavaScript. A Cloudflare Worker serves the site and API; Cloudflare D1 stores college data. The Worker and GitHub project use the technical name `edunest`; the visible product is Edutrack.
+Edutrack is a Cloudflare Workers app for college attendance and academic management. The existing HTML, CSS, JavaScript, Worker, authentication, permissions, and D1 setup are retained.
 
-## Current features
+## Features
 
-- Owner sign-in, college registration, and one shared student/moderator sign-in. The server reads the role from the stored account.
-- One OWNER per college and up to five active MODERATOR accounts per college.
-- Per-college students, academic records, permissions, attendance, routines, holidays, reports, and audit entries.
-- Individual student access codes, stored as password hashes, with owner rotation and revocation.
-- Session cookies, CSRF and origin checks, password hashing, and sign-in/registration throttling.
-- Attendance entry and correction, academic sessions, student import/export, timetable versions, holiday overrides, and read-only student dashboards.
+- Owner, moderator, and student workspaces with server-checked roles and permissions.
+- Student and academic record management, subject enrollments, attendance history, and audit records.
+- Responsive weekly timetable with class periods and highlighted recess entries.
+- Live classrooms for authorized owners and moderators. Each mark is saved immediately; ending a classroom records remaining enrolled students as absent.
+- Attendance summaries, date and subject filters, student history, monthly trends, and UTF-8 CSV exports that open in Excel.
+- In-app classroom notifications and optional browser alerts while Edutrack is open. This project does not implement push delivery to a closed browser.
+- Installable app shell. The service worker caches public shell assets only; `/api/` requests and student records remain network-only.
 
-## Existing database and migration
+## Database safety
 
-`wrangler.toml` is already configured with the existing D1 database `college-attendance`, binding `DB`, and the existing database ID. Keep that configuration. Do not run `wrangler d1 create` or replace the database.
+The classroom and reporting updates use the existing `class_sessions`, `attendance`, `audit_logs`, and `routine_periods` tables. Recess is represented within the existing routine-period fields. This update adds no D1 tables, columns, indexes, or migrations, and it adds no package dependencies.
 
-The remote database schema was inspected read-only. Migration `0001_initial.sql` is already applied. `0002_college_tenants.sql` adds a `colleges` table and college IDs to existing records, then assigns existing records to an “Existing College” workspace. It does not delete records or tables. The old global OWNER and active academic-session indexes are replaced with per-college indexes. The subject uniqueness index is also college-scoped.
+Keep the existing database, migration history, D1 binding, and database ID in `wrangler.toml`. No database command or migration is required for this update. `npm run deploy` deploys the Worker and public assets; it does not apply D1 migrations. Avoid `npm run db:remote` as part of this update.
 
-The original schema has some inline global uniqueness constraints that cannot be changed without rebuilding tables. To honor the requirement not to drop or rebuild existing tables, usernames, department names, academic-session names, roll numbers, and registration numbers remain globally unique. This can prevent two colleges from reusing those exact values, even though their records and API access are isolated by college. This is a known limitation of the current safe migration.
-
-Before applying a production migration, check the D1 storage version and recovery point. From this project folder, run:
-
-```powershell
-npx wrangler d1 info college-attendance
-npx wrangler d1 time-travel info college-attendance
-npm run db:remote
-```
-
-For a database whose `version` is `production`, D1 Time Travel is enabled automatically; record the bookmark printed by the second command before proceeding. Wrangler captures a backup after applying migrations and rolls back a migration that fails. If `version` is `alpha`, follow Cloudflare's legacy D1 backup process instead; Time Travel is not available for that storage version. Do not paste the migration into the D1 console, because Wrangler tracks migration history. This project has not applied migration `0002` to the remote database.
-
-If the migration succeeds but must be rolled back, stop application writes and restore the production database to the recorded pre-migration bookmark:
-
-```powershell
-npx wrangler d1 time-travel restore college-attendance --bookmark=<PRE_MIGRATION_BOOKMARK>
-```
-
-This restore overwrites the database in place. It also removes writes made after that bookmark, so use it only after confirming the impact. Wrangler prints a bookmark for the state immediately before restore, which can be used to undo the restore if needed. D1 Time Travel retention is limited (7 days on Workers Free, 30 days on Workers Paid); keep a separate export for longer retention.
-
-Apply the migration before deploying the updated Worker. A GitHub-connected Worker deploys code, but the D1 migration remains a separate step unless the Cloudflare build is explicitly configured to run it.
+For local development only, `npm run db:local` applies the repository migrations to the local Wrangler D1 database. Never point a development command at production unless you have separately reviewed and authorized the exact change.
 
 ## Local development
 
-1. Install a current Node.js LTS release and run `npm install`.
-2. Copy `.dev.vars.example` to `.dev.vars` and use a long random `OWNER_RECOVERY_KEY` if you need recovery for the existing legacy OWNER.
-3. Run `npm run db:local`, then `npm run dev`.
-4. Open the address Wrangler prints. Register a college in the sign-in page. The first OWNER recovery code is shown once after registration; save it securely.
+1. Install Node.js and run `npm install`.
+2. Copy `.dev.vars.example` to `.dev.vars` for local-only variables. Keep real secrets in `.dev.vars`; do not commit it.
+3. Run `npm run db:local` only when setting up a fresh local D1 database.
+4. Run `npm run dev` and open the local URL printed by Wrangler.
+5. Run `npm run check` to check JavaScript syntax.
 
-New colleges store their own recovery-code hash in D1. `OWNER_RECOVERY_KEY` is retained only as a recovery fallback for the original legacy OWNER. The old first-owner setup endpoint and setup secret are no longer used.
+Cloudflare deployment settings and the D1 binding are in `wrangler.toml`. Preserve the existing database ID, project name, timezone, and bindings when connecting or deploying through GitHub.
 
-## Sign-in and data isolation
+## GitHub upload
 
-- Owners sign in from **OWNER SIGN IN**. A new college uses **REGISTER COLLEGE**.
-- Students and moderators use **STUDENT / MODERATOR**. Students enter their individual access code; moderators leave that field empty.
-- The UI does not send a role claim. The Worker authenticates the account and selects the role from D1.
-- Authenticated API requests are scoped from the college ID stored with the user and session. The database also rejects cross-college references when records are created.
-- The migrated legacy workspace is named “Existing College” until its OWNER changes the college name under the Security section.
+Include the application source, `public/`, `migrations/`, `package.json`, `package-lock.json`, `.dev.vars.example`, `.gitignore`, `README.md`, and `wrangler.toml`. Keep the original attendance HTML file if you want to retain it in the repository; the Worker serves the app in `public/`.
 
-## Deployment
+Do not upload `.dev.vars`, `.wrangler/`, `node_modules/`, `.git/`, or the local `database/` export folder. `.gitignore` excludes these local files. Keep `.dev.vars.example` as the safe template.
 
-The Wrangler project name is `edunest`, the D1 binding is `DB`, and the configured timezone is `Asia/Kolkata`. Connect the repository to Cloudflare Workers Builds if automatic GitHub deployment is desired. Apply the D1 migration once before the updated Worker handles production traffic. Use the existing database and binding.
+## Notifications and attendance recovery
 
-The supplied project folder has no `.git` metadata, so GitHub connection status cannot be determined from this folder. The original `Attendance Sheet - College Edition.html` is retained; the served application is in `public/`.
-
-## Security notes
-
-- Never commit `.dev.vars`, real student data, or recovery codes.
-- The production database and deployment were not modified as part of this code update.
-
-## UI, timetable, notifications, and PWA update
-
-The served application in `public/` now has a refreshed responsive interface, a college name under the Edutrack wordmark after sign-in, a weekly Monday–Sunday timetable selector, password visibility controls, and an installable app shell. Owner, moderator, and student access rules continue to be enforced by the existing Worker APIs.
-
-Session-start updates use the existing `academic_session.created` audit event. The authenticated `GET /api/notifications` endpoint returns only the current college's active session event, and the interface checks for updates while Edutrack is open. Read state is kept as event IDs in browser storage, scoped to the signed-in college and user. This is an in-app notification; it does not send background push notifications to a closed browser. No tables or database schema were added or changed.
-
-The PWA caches only the public app shell and static assets. API calls stay network-only, and authenticated attendance or student data is not cached for offline use. On supported browsers, use **Install** to open the browser's install prompt. On iPhone and iPad, use Safari's **Share → Add to Home Screen** flow. Installation and service workers require HTTPS in deployment; `localhost` is suitable for local development.
-
-### Update an existing GitHub repository
-
-1. Keep a backup of your current project folder.
-2. Copy the updated project files over the matching files in your existing repository, including the new PWA files under `public/`.
-3. Keep your own `.dev.vars` file locally; it is intentionally excluded from the update bundle. Do not commit it.
-4. Review the changes, then commit and push them to the same GitHub repository connected to your existing Cloudflare Worker.
-5. Keep the existing `wrangler.toml`, D1 database ID, bindings, and migration history. No database migration is needed for these UI, timetable, notification, or PWA changes.
+Classroom status and marks are stored in the existing D1 session, attendance, and audit records. A refresh reloads saved marks from D1. Browser alerts require the user to enable them from the notification panel; they work only while the site is open. Students can view relevant live classroom information but cannot mark, edit, or export other students' attendance.

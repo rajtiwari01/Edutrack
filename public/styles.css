@@ -289,3 +289,40 @@ summary { min-height: 38px; padding: 8px 0; color: var(--accent); cursor: pointe
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+.classroom-panel { display: grid; gap: 12px; }
+.classroom-card { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 15px 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-soft); }
+.classroom-card-main { min-width: 0; }
+.classroom-card-title { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
+.classroom-card-title strong { font-size: .98rem; }
+.classroom-card p { margin: 5px 0 2px; color: var(--text); font-size: .85rem; }
+.classroom-card small { color: var(--muted); }
+.classroom-card-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.classroom-panel h3 { margin: 0; }
+.classroom-modal-summary { margin-bottom: 14px; }
+.classroom-modal-summary p { margin: 8px 0 2px; color: var(--muted); }
+.attendance-progress { font-weight: 650; }
+.classroom-modal-actions { margin-top: 16px; }
+.unsaved { background: color-mix(in srgb, #dc4b54 8%, var(--surface)); }
+.filter-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 175px), 1fr)); align-items: end; gap: 12px; padding: 15px; margin: 0 0 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-soft); }
+.filter-form .field { min-width: 0; }
+.trend-row { display: grid; grid-template-columns: minmax(125px, .8fr) minmax(80px, 1.4fr) 48px; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.trend-label { display: grid; gap: 2px; }
+.trend-label small { color: var(--muted); font-size: .73rem; }
+.trend-track { height: 9px; overflow: hidden; border-radius: 999px; background: var(--line); }
+.trend-track span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.trend-row > strong { text-align: right; font-size: .82rem; }
+.notification-enable { width: 100%; margin-top: 10px; }
+.notification-permission-note { margin: 7px 0 0; color: var(--muted); font-size: .72rem; }
+.notification-open { margin-top: 10px; }
+.recess-row td { background: color-mix(in srgb, var(--accent-soft) 58%, var(--surface)); }
+.recess-badge { border-color: color-mix(in srgb, var(--accent) 25%, var(--line)); background: var(--accent-soft); color: var(--accent); }
+
+@media (max-width: 640px) {
+  .classroom-card { align-items: flex-start; flex-direction: column; gap: 11px; }
+  .classroom-card-actions { justify-content: flex-start; width: 100%; }
+  .filter-form { grid-template-columns: 1fr; }
+  .trend-row { grid-template-columns: minmax(92px, .8fr) minmax(65px, 1fr) 42px; gap: 8px; }
+  .classroom-modal-actions { align-items: stretch; }
+  .classroom-modal-actions .button { flex: 1 1 auto; }
+}

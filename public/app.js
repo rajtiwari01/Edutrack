@@ -90,4 +90,194 @@ document.addEventListener('click',e=>{const day=e.target.closest('[data-routine-
 document.querySelector('#logout').addEventListener('click',async()=>{try{await api('/api/logout',{method:'POST',body:{}})}catch{}state.user=null;state.csrf='';state.view='overview';state.routinePeriods=null;state.routineWeekday=null;renderLogin()});
 document.querySelector('#theme-toggle').addEventListener('click',()=>{state.theme=state.theme==='dark'?'light':'dark';localStorage.setItem('edutrack-theme',state.theme);applyTheme()});
 document.addEventListener('submit',async e=>{if(e.target.id==='password-form'){e.preventDefault();try{await api('/api/me/password',{method:'POST',body:formValues(e.target)});toast('Password updated');e.target.reset()}catch(err){toast(err.message)}}else if(e.target.id==='owner-profile'){e.preventDefault();try{const r=await api('/api/me',{method:'PATCH',body:formValues(e.target)});state.user.fullName=r.fullName;state.user.collegeName=r.collegeName;document.querySelector('#identity').textContent=r.fullName;document.querySelector('#college-name').textContent=r.collegeName;toast('College profile updated')}catch(err){toast(err.message)}}});
+state.historyFilters ||= {from:'',to:'',subjectId:'',student:''};
+state.reportFilters ||= {from:'',to:'',subjectId:'',studentId:''};
+const classroomPendingMarks=new Map();
+window.addEventListener('beforeunload',event=>{if(classroomPendingMarks.size){event.preventDefault();event.returnValue=''}});
+
+function classroomStatus(status){const labels={live:'LIVE',upcoming:'UPCOMING','in-progress':'IN PROGRESS',scheduled:'SCHEDULED',completed:'COMPLETED','not-recorded':'NOT RECORDED'};return badge(labels[status]||status,status==='live'?'success':status==='not-recorded'?'warning':'')}
+function classroomAction(label,action,attrs='',kind='soft'){return `<button type="button" class="button small ${kind}" data-classroom-action="${esc(action)}" ${attrs}>${esc(label)}</button>`}
+function classCard(item,{scheduled=false,canMark=false}={}){
+  const dateLabel=fmtDate(item.heldOn||today()),time=`${item.startsAt||'—'}${item.endsAt?`–${item.endsAt}`:''}`,subject=esc(item.subjectName||'Class');
+  const controls=scheduled&&!item.sessionId?(canMark?classroomAction(item.status==='not-recorded'?'Record attendance':'Start classroom','start',`data-subject="${esc(item.subjectId||'')}" data-start="${esc(item.startsAt||'')}" data-end="${esc(item.endsAt||'')}" data-room="${esc(item.roomNumber||'')}" data-record="${item.status==='not-recorded'}"`,item.status==='not-recorded'?'soft':'primary'):''):
+    item.id?(canMark?`${classroomAction(item.status==='live'?'Open attendance':'View attendance','open',`data-id="${esc(item.id)}"`,item.status==='live'?'primary':'soft')}${item.status==='live'?classroomAction('End class','end',`data-id="${esc(item.id)}"`,'danger'):''}${classroomAction('Download report','download',`data-id="${esc(item.id)}"`,'quiet')}${classroomAction('Edit details','edit',`data-id="${esc(item.id)}"`,'quiet')}`:'') : '';
+  return `<article class="classroom-card"><div class="classroom-card-main"><div class="classroom-card-title"><strong>${subject}</strong>${classroomStatus(item.status)}</div><p>${esc(time)} · ${esc(item.roomNumber||'Room TBA')}</p><small>${esc(item.teacherName||item.facultyName||'Teacher not listed')} · ${dateLabel}</small></div><div class="classroom-card-actions">${controls}</div></article>`;
+}
+
+routineDayContent = function routineDayContent(periods,weekday,edit){
+  const selected=periods.filter(period=>period.weekday===weekday).sort((a,b)=>(a.position??0)-(b.position??0)||String(a.startsAt).localeCompare(String(b.startsAt)));
+  if(!selected.length)return empty('No periods scheduled',`There are no routine periods for ${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][weekday]}.`);
+  return table(['Period','Subject / break','Code','Starts','Ends','Length','Room','Teacher / Faculty','Class',...(edit?['Actions']:[])],selected.map(period=>{
+    const isBreak=period.periodType==='break',duration=Math.max(0,(Number(period.endsAt?.slice(0,2))*60+Number(period.endsAt?.slice(3,5)))-(Number(period.startsAt?.slice(0,2))*60+Number(period.startsAt?.slice(3,5))));
+    return `<tr class="${isBreak?'recess-row':''}"><td>${Number(period.position||0)+1}</td><td>${isBreak?badge('RECESS','recess-badge'):esc(period.subjectName)}</td><td>${isBreak?'—':esc(period.subjectCode)}</td><td>${esc(period.startsAt)}</td><td>${esc(period.endsAt)}</td><td>${duration} min</td><td>${esc(period.roomNumber||'—')}</td><td>${esc(period.facultyName||'—')}</td><td>${esc([period.departmentName,period.courseName,period.semesterName,period.section].filter(Boolean).join(' · ')||'—')}</td>${edit?`<td class="routine-actions"><button class="button small soft" data-action="routine-up" data-id="${esc(period.periodId)}" aria-label="Move period up">↑</button> <button class="button small soft" data-action="routine-down" data-id="${esc(period.periodId)}" aria-label="Move period down">↓</button> <button class="button small soft" data-action="routine-edit" data-id="${esc(period.periodId)}">Edit</button> <button class="button small danger" data-action="routine-delete" data-id="${esc(period.periodId)}">Delete</button></td>`:''}</tr>`;
+  }));
+};
+
+addRoutine = async function addRoutine(){
+  const data=await api('/api/routines/options'),days=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map((name,value)=>({value,label:name}));
+  const content=selectField('periodType','Period type',[{value:'class',label:'Class period'},{value:'break',label:'Recess / break'}],'class','required')+selectField('departmentId','Department',data.departments.map(item=>({value:item.id,label:item.name})),'','required')+selectField('courseId','Course',data.courses.map(item=>({value:item.id,label:item.name})),'')+selectField('subjectId','Subject / class group',data.subjects.map(item=>({value:item.id,label:`${item.name} · ${item.code}`})),'','required')+'<p class="mobile-note">For a recess, select the class group that owns this timetable. The break is stored as a routine period and does not affect attendance.</p>'+field('semesterName','Semester label','text','','required')+field('section','Section')+selectField('weekday','Day of week',days,'','required')+field('effectiveFrom','Effective from','date',today(),'required')+field('startsAt','Start time','time','','required')+field('endsAt','End time','time','','required')+field('roomNumber','Room number')+field('facultyName','Faculty name')+textareaField('notes','Notes');
+  const values=await modalForm('Add routine period',content,'Save period');if(!values)return;
+  try{await api('/api/routines',{method:'POST',body:values});toast(values.periodType==='break'?'Recess added to the timetable':'Routine period saved');await refreshView()}catch(error){toast(error.message)}
+};
+
+viewAttendance = async function viewAttendance(){
+  const [options,overview]=await Promise.all([api('/api/attendance/options'),api(`/api/classrooms?date=${encodeURIComponent(today())}`)]);
+  const canMark=state.user.role==='OWNER'||options.subjects.some(subject=>subject.canMark);
+  const live=overview.sessions.filter(item=>item.status==='live'),completed=overview.sessions.filter(item=>item.status!=='live');
+  const scheduled=overview.scheduled.filter(item=>!overview.sessions.some(session=>session.heldOn===today()&&session.subjectId===item.subjectId&&session.startsAt===item.startsAt));
+  const scheduledRows=scheduled.map(item=>classCard(item,{scheduled:true,canMark})).join('');
+  const liveRows=live.map(item=>classCard(item,{canMark})).join('');
+  const doneRows=completed.map(item=>classCard(item,{canMark})).join('');
+  return `<div class="section-title"><div><p class="eyebrow">Classroom workspace</p><h2>Attendance</h2></div>${canMark?classroomAction('Start a classroom','start','data-start="" data-end="" data-room=""','primary'):''}</div>
+    <p class="subtle">Start a classroom, save each attendance mark as it is made, and end the session to record any unmarked students as absent.</p>
+    <section class="card classroom-panel" aria-labelledby="classroom-live-heading"><div class="section-title"><div><p class="eyebrow">Live control</p><h3 id="classroom-live-heading">Classroom</h3></div>${badge(`${live.length} LIVE`)}</div>
+      ${live.length?liveRows:empty('No classroom is live','Start a class from here or use one of today’s scheduled periods below.')}
+    </section>
+    <section class="card classroom-panel"><div class="section-title"><div><p class="eyebrow">Today · ${fmtDate(today())}</p><h3>Scheduled classes</h3></div></div>
+      ${scheduledRows||empty('No classes scheduled today','The timetable remains available in Class routine.')}
+    </section>
+    <section class="card classroom-panel"><div class="section-title"><div><p class="eyebrow">Saved sessions</p><h3>Completed classrooms</h3></div></div>
+      ${doneRows||empty('No completed sessions today','Completed attendance will appear here and in attendance history.')}
+    </section>
+    <section class="card"><div class="section-title"><div><h3>Available subjects</h3><p class="subtle">Open a subject’s attendance history or start a session.</p></div></div>
+      ${options.subjects.length?table(['Subject','Code','Department','Enrolled','Actions'],options.subjects.map(subject=>`<tr><td>${esc(subject.name)}</td><td>${esc(subject.code)}</td><td>${esc(subject.departmentName)}</td><td>${subject.enrolled}</td><td>${subject.canHistory?`<button class="button small soft" data-action="attendance-history" data-id="${esc(subject.id)}">History</button>`:''}${subject.canMark?classroomAction('Start','start',`data-subject="${esc(subject.id)}"`,'primary'):''}</td></tr>`)):empty('No subjects available','Create a subject and enroll students to begin.')}
+    </section>`;
+}
+
+function localClock(){return new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date())}
+function addClockMinutes(value,minutes){const [hour,minute]=value.split(':').map(Number),total=Math.min(23*60+59,hour*60+minute+minutes);return `${String(Math.floor(total/60)).padStart(2,'0')}:${String(total%60).padStart(2,'0')}`}
+async function startClassroom(preset={}){
+  try{
+    const {subjects}=await api('/api/attendance/options'),available=subjects.filter(item=>item.canMark);
+    if(!available.length){toast('You do not have permission to start a classroom.');return}
+    const now=localClock(),start=preset.startsAt&&preset.startsAt<=now?preset.startsAt:now,end=preset.endsAt&&preset.endsAt>start?preset.endsAt:addClockMinutes(start,50);
+    const values=await modalForm('Start classroom',selectField('subjectId','Subject',available.map(item=>({value:item.id,label:`${item.name} · ${item.code}`})),preset.subjectId||'','required')+field('heldOn','Class date','date',today(),'required readonly')+field('startsAt','Start time','time',start,'required')+field('endsAt','Planned end time','time',end,'required')+field('roomNumber','Room number','text',preset.roomNumber||''),'Start classroom');
+    if(!values)return;
+    let holiday=null;try{const holidayData=await api('/api/holidays');holiday=holidayData.holidays.find(item=>item.startsOn<=values.heldOn&&item.endsOn>=values.heldOn)}catch{}
+    let overrideHoliday=false;
+    if(holiday){if(state.user.role!=='OWNER'){toast(`A classroom cannot start on ${holiday.name}.`);return}overrideHoliday=!!await confirmDialog('Start class on a holiday?',`${holiday.name} is recorded for today. This exception will be written to the audit history.`,'Start classroom',true);if(!overrideHoliday)return}
+    const result=await api('/api/classrooms',{method:'POST',body:{...values,overrideHoliday}});
+    toast('Classroom is live. Attendance changes save as you mark them.');
+    await refreshView();
+    await openClassroom(result.id);
+  }catch(error){toast(error.message)}
+}
+
+function attendanceCounts(root){
+  const selects=[...root.querySelectorAll('[data-classroom-mark]')],present=selects.filter(item=>item.value==='present').length,absent=selects.filter(item=>item.value==='absent').length;
+  const stats=root.querySelector('.attendance-progress');if(stats)stats.textContent=`${present} present · ${absent} absent · ${selects.length-present-absent} unmarked`;
+}
+async function saveClassroomMark(sessionId,select){
+  const row=select.closest('[data-student-row]'),status=row?.querySelector('[data-save-state]');if(!row)return;
+  const studentId=select.dataset.studentId,key=`${sessionId}:${studentId}`;classroomPendingMarks.set(key,{sessionId,studentId,value:select.value});
+  if(status)status.textContent='Saving…';const retry=row.querySelector('[data-classroom-retry]');if(retry)retry.hidden=true;select.disabled=true;attendanceCounts(dialog);
+  try{
+    if(!select.value)throw new Error('Choose present or absent before saving.');
+    await api(`/api/classrooms/${encodeURIComponent(sessionId)}/attendance`,{method:'PUT',body:{entries:[{studentId,status:select.value}]}});
+    classroomPendingMarks.delete(key);if(status)status.textContent='Saved';if(retry)retry.hidden=true;row.classList.remove('unsaved');
+  }catch(error){if(status)status.textContent=`Not saved · ${error.message}`;if(retry)retry.hidden=false;row.classList.add('unsaved')}
+  finally{select.disabled=false;attendanceCounts(dialog)}
+}
+async function openClassroom(id){
+  try{
+    const data=await api(`/api/classrooms/${encodeURIComponent(id)}`),item=data.classroom,canEdit=item.status==='live';
+    const roster=data.roster.map(student=>`<tr data-student-row><td><b>${esc(student.fullName)}</b><br><small>${esc(student.rollNumber||'')}</small></td><td>${canEdit?`<select class="control attendance-status" data-classroom-mark data-student-id="${esc(student.id)}" aria-label="Attendance for ${esc(student.fullName)}"><option value="" disabled ${!student.status?'selected':''}>Choose status…</option><option value="present" ${student.status==='present'?'selected':''}>Present</option><option value="absent" ${student.status==='absent'?'selected':''}>Absent</option></select>`:badge(student.status||'Unmarked',student.status==='absent'?'danger':'')}</td><td><span data-save-state>${student.status?'Saved':'Not marked'}</span><button type="button" class="button small quiet" data-classroom-retry hidden>Retry</button></td></tr>`).join('');
+    const content=`<div class="classroom-modal-summary">${classroomStatus(item.status)}<p>${esc(item.subjectName)} · ${fmtDate(item.heldOn)} · ${esc(item.startsAt||'—')}–${esc(item.endsAt||'—')} · ${esc(item.roomNumber||'Room TBA')}</p><p class="attendance-progress" aria-live="polite"></p></div><div class="table-wrap"><table><thead><tr><th>Student</th><th>Attendance</th><th>Save state</th></tr></thead><tbody>${roster||'<tr><td colspan="3">No enrolled students were found.</td></tr>'}</tbody></table></div>${canEdit?'<p class="mobile-note">Marks save immediately. If a network error occurs, the row stays marked unsaved and this page will warn before refresh.</p><div class="row-actions classroom-modal-actions"><button type="button" class="button danger" data-classroom-action="end" data-id="'+esc(id)+'">End classroom</button><button type="button" class="button soft" data-classroom-action="download" data-id="'+esc(id)+'">Download report</button></div>':''}`;
+    const closed=modalForm(`${item.subjectName} · Attendance`,content,'Close');
+    const controller=new AbortController();
+    dialog.addEventListener('change',event=>{const select=event.target.closest('[data-classroom-mark]');if(select)saveClassroomMark(id,select)},{signal:controller.signal});
+    dialog.addEventListener('click',async event=>{
+      const target=event.target.closest('[data-classroom-action]');if(!target)return;
+      if(target.dataset.classroomAction==='download'){event.preventDefault();event.stopPropagation();await downloadClassroomReport(id);return}
+      if(target.dataset.classroomAction==='end'){
+        event.preventDefault();event.stopPropagation();
+        if(classroomPendingMarks.size){toast('Wait for attendance marks to save before ending this classroom.');return}
+        if(!window.confirm('End this classroom? Every enrolled student without a saved mark will be recorded absent.'))return;
+        try{const result=await api(`/api/classrooms/${encodeURIComponent(id)}`,{method:'PATCH',body:{action:'end'}});toast(`Classroom ended. ${result.autoAbsent||0} unmarked students recorded absent.`);dialog.close();await refreshView()}catch(error){toast(error.message)}
+      }
+    },{signal:controller.signal});
+    dialog.addEventListener('click',event=>{const retry=event.target.closest('[data-classroom-retry]');if(!retry)return;const row=retry.closest('[data-student-row]'),select=row?.querySelector('[data-classroom-mark]');if(select)saveClassroomMark(id,select)},{signal:controller.signal});
+    attendanceCounts(dialog);
+    await closed;controller.abort();
+  }catch(error){toast(error.message)}
+}
+async function editClassroom(id){
+  try{
+    const {classroom:item}=await api(`/api/classrooms/${encodeURIComponent(id)}`),values=await modalForm(`Edit ${item.subjectName}`,field('startsAt','Start time','time',item.startsAt||'','required')+field('endsAt','End time','time',item.endsAt||'','required')+field('roomNumber','Room number','text',item.roomNumber||''),'Save details');
+    if(!values)return;await api(`/api/classrooms/${encodeURIComponent(id)}`,{method:'PATCH',body:{action:'update',...values}});toast('Class details updated');await refreshView();
+  }catch(error){toast(error.message)}
+}
+async function downloadClassroomReport(id){
+  try{const data=await api(`/api/classrooms/${encodeURIComponent(id)}`),item=data.classroom;downloadCSV(`edutrack-class-${item.heldOn}-${item.subjectCode||'attendance'}.csv`,[['Student name','Student identifier','Subject','Session','Date','Start time','End time','Room','Status','Teacher'],...data.roster.map(student=>[student.fullName,student.rollNumber||'',item.subjectName,item.id,item.heldOn,item.startsAt||'',item.endsAt||'',item.roomNumber||'',student.status||'unmarked',item.teacherName||''])])}catch(error){toast(error.message)}
+}
+
+function filteredHistoryQuery(filters){const params=new URLSearchParams();params.set('details','1');for(const key of ['from','to','subjectId'])if(filters[key])params.set(key,filters[key]);return params.toString()}
+viewHistory = async function viewHistory(){
+  const isStudent=state.user.role==='STUDENT',filters=state.historyFilters||{},query=filteredHistoryQuery(filters);
+  const [data,options]=await Promise.all([api(isStudent?'/api/student/attendance':`/api/attendance/history${query?`?${query}`:''}`),isStudent?Promise.resolve({subjects:[]}):api('/api/attendance/options')]);
+  const canEdit=state.user.role==='OWNER'||state.user.permissions?.includes('edit_attendance');
+  const filtered=isStudent?data.records:(data.records||[]).filter(row=>!filters.student||`${row.studentName} ${row.rollNumber}`.toLowerCase().includes(filters.student.toLowerCase()));
+  const filterForm=isStudent?'':`<form id="history-filter" class="filter-form"><label class="field">From<input type="date" name="from" value="${esc(filters.from||'')}"></label><label class="field">To<input type="date" name="to" value="${esc(filters.to||'')}"></label>${selectField('subjectId','Subject',[{value:'',label:'All subjects'},...options.subjects.map(subject=>({value:subject.id,label:`${subject.name} · ${subject.code}`}))],filters.subjectId||'')}<label class="field">Student search<input type="search" name="student" value="${esc(filters.student||'')}" placeholder="Name or roll number"></label><button class="button primary">Apply filters</button><button type="button" class="button soft" data-classroom-action="export-history">Download filtered CSV</button></form>`;
+  return `<div class="section-title"><div><p class="eyebrow">Attendance records</p><h2>Attendance history</h2></div>${isStudent?classroomAction('Download my CSV','export-student-history') : ''}</div>${filterForm}${filtered.length?table(isStudent?['Date','Subject','Code','Status','Room']:['Date','Time','Subject','Student','Roll','Status','Teacher',...(canEdit?['Correction']:[]),'Report'],filtered.map(row=>`<tr><td>${fmtDate(row.heldOn)}</td>${isStudent?'':`<td>${esc(row.startsAt||'—')}</td>`}<td>${esc(row.subjectName)}</td>${isStudent?`<td>${esc(row.subjectCode)}</td><td>${badge(row.status,row.status==='absent'?'danger':'')}</td><td>${esc(row.roomNumber||'—')}</td>`:`<td>${esc(row.studentName||'—')}</td><td>${esc(row.rollNumber||'—')}</td><td>${badge(row.status,row.status==='absent'?'danger':'')}</td><td>${esc(row.teacherName||'—')}</td>${canEdit?`<td><button class="button small soft" data-action="attendance-correct" data-id="${esc(row.id)}" data-status="${esc(row.status)}">Correct</button></td>`:''}<td>${classroomAction('CSV','download',`data-id="${esc(row.classSessionId)}"`,'quiet')}</td>`}</tr>`)):empty('No attendance history','Try adjusting the date or subject filters.')}`;
+}
+
+viewReports = async function viewReports(){
+  const filters=state.reportFilters||{},params=new URLSearchParams();params.set('details','1');for(const key of ['from','to','subjectId','studentId'])if(filters[key])params.set(key,filters[key]);
+  const query=params.toString(),[history,audit,options,students]=await Promise.all([api(`/api/attendance/history?${query}`),api('/api/audit'),api('/api/attendance/options'),api('/api/students')]);
+  const records=history.records||[],present=records.filter(row=>row.status==='present').length,absent=records.length-present,held=new Set(records.map(row=>row.classSessionId)).size,percentage=records.length?pct(present,records.length):null;
+  const bySubject=new Map(),byStudent=new Map(),byMonth=new Map(),byDate=new Map();
+  for(const row of records){
+    const subject=bySubject.get(row.subjectId)||{name:row.subjectName,code:row.subjectCode,held:0,present:0};subject.held++;if(row.status==='present')subject.present++;bySubject.set(row.subjectId,subject);
+    const student=byStudent.get(row.studentId)||{name:row.studentName,roll:row.rollNumber,held:0,present:0};student.held++;if(row.status==='present')student.present++;byStudent.set(row.studentId,student);
+    const month=(row.heldOn||'').slice(0,7),monthly=byMonth.get(month)||{held:0,present:0};monthly.held++;if(row.status==='present')monthly.present++;byMonth.set(month,monthly);
+    const daily=byDate.get(row.heldOn)||{held:0,present:0};daily.held++;if(row.status==='present')daily.present++;byDate.set(row.heldOn,daily);
+  }
+  const monthly=[...byMonth.entries()].sort((a,b)=>a[0].localeCompare(b[0])).slice(-12),daily=[...byDate.entries()].sort((a,b)=>b[0].localeCompare(a[0])).slice(0,31),subjects=[...bySubject.values()].sort((a,b)=>a.name.localeCompare(b.name)),studentRows=[...byStudent.values()].sort((a,b)=>pct(a.present,a.held)-pct(b.present,b.held)),monthBars=monthly.map(([month,item])=>{const rate=pct(item.present,item.held);return `<div class="trend-row"><div class="trend-label"><b>${esc(month)}</b><small>${item.present}/${item.held} present</small></div><div class="trend-track"><span style="width:${rate}%"></span></div><strong>${rate}%</strong></div>`}).join('');
+  const filter=`<form id="report-filter" class="filter-form"><label class="field">From<input type="date" name="from" value="${esc(filters.from||'')}"></label><label class="field">To<input type="date" name="to" value="${esc(filters.to||'')}"></label>${selectField('subjectId','Subject',[{value:'',label:'All subjects'},...options.subjects.map(subject=>({value:subject.id,label:`${subject.name} · ${subject.code}`}))],filters.subjectId||'')}${selectField('studentId','Student',[{value:'',label:'All students'},...students.students.map(student=>({value:student.id,label:`${student.fullName} · ${student.rollNumber}`}))],filters.studentId||'')}<button class="button primary">Apply report filters</button><button type="button" class="button soft" data-classroom-action="export-reports">Download filtered CSV</button></form>`;
+  const subjectTable=subjects.length?table(['Subject','Code','Classes','Present','Absent','Attendance'],subjects.map(item=>{const rate=pct(item.present,item.held);return `<tr><td>${esc(item.name)}</td><td>${esc(item.code)}</td><td>${item.held}</td><td>${item.present}</td><td>${item.held-item.present}</td><td>${rate}%</td></tr>`})):empty('No attendance data in this range');
+  const studentTable=studentRows.length?table(['Student','Roll','Classes','Present','Absent','Attendance'],studentRows.map(item=>{const rate=pct(item.present,item.held);return `<tr><td>${esc(item.name)}</td><td>${esc(item.roll||'—')}</td><td>${item.held}</td><td>${item.present}</td><td>${item.held-item.present}</td><td>${badge(`${rate}%`,rate<75?'danger':'')}</td></tr>`})):empty('No student attendance in this range');
+  return `<div class="section-title"><div><p class="eyebrow">Reports & audit</p><h2>Attendance analytics</h2></div></div>${filter}<div class="grid">${stat('Overall attendance',percentage===null?'—':`${percentage}%`,'Present marks in the selected range')}${stat('Classes conducted',held,'Unique class sessions')}${stat('Present marks',present)}${stat('Absent marks',absent)}<article class="card span-6"><h3>Monthly attendance trend</h3>${monthBars||empty('No monthly data yet')}</article><article class="card span-6"><h3>Subject attendance</h3>${subjectTable}</article><article class="card span-6"><h3>Date-wise attendance</h3>${daily.length?table(['Date','Classes','Present','Absent','Rate'],daily.map(([date,item])=>`<tr><td>${fmtDate(date)}</td><td>${item.held}</td><td>${item.present}</td><td>${item.held-item.present}</td><td>${pct(item.present,item.held)}%</td></tr>`)):empty('No daily data yet')}</article><article class="card span-6"><h3>Student attendance</h3>${studentTable}</article><article class="card span-12"><h3>Recent activity</h3>${audit.logs.length?table(['When','Actor','Event','Target','Details'],audit.logs.map(row=>`<tr><td>${new Date(row.createdAt).toLocaleString()}</td><td>${esc(row.actorName||'System')}</td><td>${esc(row.eventType)}</td><td>${esc([row.targetType,row.targetId].filter(Boolean).join(' · ')||'—')}</td><td>${esc(row.summary||'—')}</td></tr>`)):empty('No activity recorded')}</article></div>`;
+}
+
+exportReports = async function exportReports(){
+  try{const filters=state.reportFilters||{},params=new URLSearchParams();params.set('details','1');for(const key of ['from','to','subjectId','studentId'])if(filters[key])params.set(key,filters[key]);const rows=await fetchAllAttendance(params);downloadCSV(`edutrack-attendance-report-${today()}.csv`,[['Student name','Student identifier','Subject','Subject code','Classroom session','Date','Start time','End time','Room','Status','Teacher'],...rows.map(row=>[row.studentName,row.rollNumber,row.subjectName,row.subjectCode,row.classSessionId,row.heldOn,row.startsAt||'',row.endsAt||'',row.roomNumber||'',row.status,row.teacherName||''])])}catch(error){toast(error.message)}
+}
+
+async function fetchAllAttendance(params){
+  const records=[],pageSize=1000,maxPages=500;
+  for(let page=0;page<maxPages;page++){
+    const query=new URLSearchParams(params);query.set('details','1');query.set('limit',String(pageSize));query.set('offset',String(page*pageSize));
+    const data=await api(`/api/attendance/history?${query.toString()}`),batch=data.records||[];records.push(...batch);if(batch.length<pageSize)return records;
+  }
+  toast('Export reached the 500,000 record limit. Add a date filter to export the remaining period.');
+  return records;
+}
+async function exportHistory(){
+  try{const filters=state.historyFilters||{},params=new URLSearchParams(filteredHistoryQuery(filters)),records=await fetchAllAttendance(params),rows=records.filter(row=>!filters.student||`${row.studentName} ${row.rollNumber}`.toLowerCase().includes(filters.student.toLowerCase()));downloadCSV(`edutrack-attendance-history-${today()}.csv`,[['Student name','Student identifier','Subject','Subject code','Classroom session','Date','Start time','End time','Room','Status','Teacher'],...rows.map(row=>[row.studentName,row.rollNumber,row.subjectName,row.subjectCode,row.classSessionId,row.heldOn,row.startsAt||'',row.endsAt||'',row.roomNumber||'',row.status,row.teacherName||''])])}catch(error){toast(error.message)}
+}
+document.addEventListener('click',event=>{
+  const target=event.target.closest('[data-classroom-action]');if(!target)return;
+  const action=target.dataset.classroomAction,id=target.dataset.id;
+  if(action==='start'){if(target.dataset.record==='true')startAttendance();else startClassroom({subjectId:target.dataset.subject,startsAt:target.dataset.start,endsAt:target.dataset.end,roomNumber:target.dataset.room})}
+  else if(action==='open'||action==='download'||action==='edit'){
+    if(action==='open')openClassroom(id);else if(action==='download')downloadClassroomReport(id);else editClassroom(id);
+  }else if(action==='end')endClassroom(id);
+  else if(action==='export-history')exportHistory();else if(action==='export-student-history')exportStudentHistory();
+  else if(action==='export-reports')exportReports();
+});
+document.addEventListener('submit',event=>{
+  if(event.target.id==='history-filter'){
+    event.preventDefault();state.historyFilters=Object.fromEntries(new FormData(event.target));renderView();
+  }else if(event.target.id==='report-filter'){
+    event.preventDefault();state.reportFilters=Object.fromEntries(new FormData(event.target));renderView();
+  }
+});
+async function exportStudentHistory(){try{const data=await api('/api/student/attendance');downloadCSV(`edutrack-my-attendance-${today()}.csv`,[['Date','Subject','Code','Room','Status'],...(data.records||[]).map(row=>[row.heldOn,row.subjectName,row.subjectCode,row.roomNumber||'',row.status])])}catch(error){toast(error.message)}}
+async function endClassroom(id){if(classroomPendingMarks.size){toast('Wait for attendance marks to save before ending this classroom.');return}if(!window.confirm('End this classroom? Every enrolled student without a saved mark will be recorded absent.'))return;try{const result=await api(`/api/classrooms/${encodeURIComponent(id)}`,{method:'PATCH',body:{action:'end'}});toast(`Classroom ended. ${result.autoAbsent||0} unmarked students recorded absent.`);await refreshView()}catch(error){toast(error.message)}}
+document.addEventListener('edutrack:open-classroom',event=>{
+  const classroomId=event.detail?.classroomId;
+  if(state.user?.role==='OWNER'||state.user?.role==='MODERATOR'){state.view='attendance';render().then(()=>classroomId&&openClassroom(classroomId))}
+  else if(state.user?.role==='STUDENT'){state.view='routine';render()}
+});
+
 boot();
