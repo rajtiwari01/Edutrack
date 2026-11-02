@@ -9,7 +9,7 @@ Edutrack is a Cloudflare Workers college management app backed by Cloudflare D1.
 - Optional student registration numbers. Internal student IDs remain the record keys.
 - Single-use student QR login codes stored as hashes, with a five minute expiry, explicit sign-in action, and rate-limited verification.
 - Weekly horizontal timetable with chronological periods, class details, and visually distinct recess periods.
-- College notices with audience, expiry, pinned status, and JPEG/PNG/WebP image uploads stored in R2.
+- Text-only college notices with audience, expiry, and pinned status, stored in the existing D1 database.
 - Web Push subscriptions per user and device, classroom/notice push events, invalid subscription cleanup, and retry queue.
 - Installable PWA shell. The service worker caches only public shell assets; API responses and private student data are network-only.
 
@@ -33,19 +33,17 @@ Keep the current database name and ID in `wrangler.toml`. Do not run `npm run db
 4. Start the app with `npm run dev`.
 5. Run `npm run check` for JavaScript syntax checks.
 
-Local image storage uses Wrangler's local R2 emulator. The bucket binding is declared in `wrangler.toml` as `NOTICE_BUCKET`.
+This no-R2 configuration does not require an object-storage bucket or R2 subscription. Notice titles and text are stored in the existing D1 database.
 
 ## Cloudflare setup
 
-### R2 notices bucket
+### Free-plan usage
 
-Create the production bucket once:
+This project can run on Cloudflare's Workers Free plan while usage stays within the current limits. The published limits include 100,000 Worker requests per day and 10 ms CPU time per invocation; D1 includes 5 million rows read per day, 100,000 rows written per day, and 5 GB total storage. Workers Builds includes 3,000 build minutes per month. Exceeding free D1 daily limits causes database queries to fail until the daily reset. Review the current limits before production use:
 
-```sh
-npx wrangler r2 bucket create edutrack-notices
-```
-
-The existing Worker config binds this bucket as `NOTICE_BUCKET`. Notice images accept JPEG, PNG, and WebP only, are limited to 5 MB, are signature-checked, and are served through an authenticated same-origin route. Do not make the bucket public.
+- [Workers pricing and limits](https://developers.cloudflare.com/workers/platform/pricing/)
+- [D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/)
+- [Workers Builds limits](https://developers.cloudflare.com/workers/ci-cd/builds/limits-and-pricing/)
 
 ### Web Push keys
 
@@ -68,7 +66,7 @@ Users must grant notification permission and enable push separately on each devi
 
 ### Production deployment
 
-After reviewing and applying migration 0003, creating the R2 bucket, setting VAPID values, and checking the production `VAPID_SUBJECT`, deploy through the existing GitHub/Cloudflare workflow or run `npm run deploy`. The Worker cron schedule retries pending push deliveries every five minutes. Deployment does not apply D1 migrations automatically.
+After reviewing and applying migrations 0003 and 0004, setting VAPID values, and checking the production `VAPID_SUBJECT`, deploy through the existing GitHub/Cloudflare workflow or run `npm run deploy`. No R2 bucket is required. The Worker cron schedule retries pending push deliveries every five minutes. Deployment does not apply D1 migrations automatically.
 
 ## QR login behavior
 

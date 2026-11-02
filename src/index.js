@@ -237,60 +237,16 @@ async function notificationsRoute(request,env){
 
 async function canManageNotices(env,user){return user.role==='OWNER'||user.role==='TEACHER'||await hasPermission(env,user,'manage_notices')}
 async function noticeRecipients(env,visibility){let sql=`SELECT u.id FROM users u WHERE u.status='active'`;if(visibility==='students')sql+=` AND u.role='STUDENT' AND NOT EXISTS(SELECT 1 FROM teacher_accounts WHERE user_id=u.id)`;if(visibility==='staff')sql+=` AND (u.role<>'STUDENT' OR EXISTS(SELECT 1 FROM teacher_accounts WHERE user_id=u.id))`;return((await db(env,sql).all()).results||[]).map(row=>row.id)}
-async function readNoticeImage(request,limit){
-  const declared=Number(request.headers.get('content-length')||0);
-  if(declared>limit)fail(413,'Images must be 5 MB or smaller.');
-  if(!request.body)fail(400,'Choose an image to upload.');
-  const reader=request.body.getReader(),chunks=[];let size=0;
-  try{while(true){const{done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>limit){await reader.cancel();fail(413,'Images must be 5 MB or smaller.')}chunks.push(value)}}finally{reader.releaseLock()}
-  const bytes=new Uint8Array(size);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength}
-  const type=(request.headers.get('content-type')||'').split(';')[0].trim().toLowerCase();
-  const png=bytes.length>=8&&[137,80,78,71,13,10,26,10].every((v,i)=>bytes[i]===v);
-  const jpeg=bytes.length>=3&&bytes[0]===255&&bytes[1]===216&&bytes[2]===255;
-  const webp=bytes.length>=12&&String.fromCharCode(...bytes.slice(0,4))==='RIFF'&&String.fromCharCode(...bytes.slice(8,12))==='WEBP';
-  const extension=png&&type==='image/png'?'png':jpeg&&type==='image/jpeg'?'jpg':webp&&type==='image/webp'?'webp':null;
-  if(!extension)fail(415,'Upload a valid JPEG, PNG, or WebP image.');
-  return{bytes,type,extension};
-}
-
 async function noticesRoute(request,env,path,method,ctx){
   const user=await requireAuth(request,env,method!=='GET');
   if(path==='/api/notices'&&method==='GET'){
     const manage=new URL(request.url).searchParams.get('manage')==='1';
     if(manage&&!await canManageNotices(env,user))fail(403,'You do not have permission to manage notices.');
     const visibility=user.role==='STUDENT'?"n.visibility IN ('all','students')":"n.visibility IN ('all','staff')";
-    const rows=await db(env,`SELECT n.id,n.title,n.body,n.visibility,n.pinned,n.published_at AS publishedAt,n.expires_at AS expiresAt,n.created_by AS authorId,u.full_name AS authorName,n.image_key AS imageKey FROM notices n JOIN users u ON u.id=n.created_by WHERE ${manage?'1=1':`n.published_at<=? AND (n.expires_at IS NULL OR n.expires_at>?) AND (${visibility})`} ORDER BY n.pinned DESC,n.published_at DESC LIMIT 100`,...(manage?[]:[nowIso(),nowIso()])).all();
-    const notices=(rows.results||[]).map(({imageKey,...notice})=>({...notice,imageUrl:imageKey?`/api/notices/${encodeURIComponent(notice.id)}/image`:null}));
-    return json({notices});
+    const rows=await db(env,`SELECT n.id,n.title,n.body,n.visibility,n.pinned,n.published_at AS publishedAt,n.expires_at AS expiresAt,n.created_by AS authorId,u.full_name AS authorName FROM notices n JOIN users u ON u.id=n.created_by WHERE ${manage?'1=1':`n.published_at<=? AND (n.expires_at IS NULL OR n.expires_at>?) AND (${visibility})`} ORDER BY n.pinned DESC,n.published_at DESC LIMIT 100`,...(manage?[]:[nowIso(),nowIso()])).all();
+    return json({notices:rows.results||[]});
   }
-  const imageMatch=path.match(/^\/api\/notices\/([^/]+)\/image$/);
-  if(imageMatch){
-    const id=lookupId(imageMatch[1]),notice=await db(env,'SELECT id,image_key AS imageKey,visibility,published_at AS publishedAt,expires_at AS expiresAt FROM notices WHERE id=?',id).first();
-    if(!notice)fail(404,'Notice image not found.');
-    if(method==='GET'){
-      const manager=await canManageNotices(env,user),student=user.role==='STUDENT',visible=student?['all','students'].includes(notice.visibility):['all','staff'].includes(notice.visibility);
-      if(!manager&&(!visible||notice.publishedAt>nowIso()||(notice.expiresAt&&notice.expiresAt<=nowIso())))fail(404,'Notice image not found.');
-      if(!notice.imageKey||!env.NOTICE_BUCKET)fail(404,'Notice image not found.');
-      const object=await env.NOTICE_BUCKET.get(notice.imageKey);if(!object)fail(404,'Notice image not found.');
-      return new Response(object.body,{headers:{'Content-Type':object.httpMetadata?.contentType||'application/octet-stream','Content-Length':String(object.size),'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});
-    }
-    if(!await canManageNotices(env,user))fail(403,'You do not have permission to manage notice images.');
-    if(!env.NOTICE_BUCKET)fail(503,'Notice image storage is not configured. Create the edutrack-notices R2 bucket and bind it as NOTICE_BUCKET.');
-    if(method==='DELETE'){
-      if(notice.imageKey)await env.NOTICE_BUCKET.delete(notice.imageKey);
-      await db(env,'UPDATE notices SET image_key=NULL,updated_at=? WHERE id=?',nowIso(),id).run();
-      await audit(env,user.id,'notice.image.deleted','notice',id);return json({ok:true});
-    }
-    if(method==='PUT'){
-      const{bytes,type,extension}=await readNoticeImage(request,5*1024*1024),key=`notices/${user.college_id}/${id}/${UUID()}.${extension}`;
-      await env.NOTICE_BUCKET.put(key,bytes,{httpMetadata:{contentType:type,cacheControl:'private, no-store'}});
-      try{await db(env,'UPDATE notices SET image_key=?,updated_at=? WHERE id=?',key,nowIso(),id).run()}
-      catch(error){await env.NOTICE_BUCKET.delete(key);throw error}
-      if(notice.imageKey)await env.NOTICE_BUCKET.delete(notice.imageKey);
-      await audit(env,user.id,'notice.image.uploaded','notice',id,{contentType:type,size:bytes.byteLength});return json({imageUrl:`/api/notices/${encodeURIComponent(id)}/image`});
-    }
-    fail(405,'Method not allowed.');
-  }
+  if(/^\/api\/notices\/[^/]+\/image$/.test(path))fail(404,'Notice images are not enabled in this deployment.');
   if(path==='/api/notices'&&method==='POST'){
     if(!await canManageNotices(env,user))fail(403,'You do not have permission to publish notices.');
     const b=await jsonBody(request),title=requiredText(b,'title','Notice title',180),body=requiredText(b,'body','Notice text',5000),visibility=trim(b.visibility,20)||'all',pinned=b.pinned===true||b.pinned==='true'?1:0,expiresOn=trim(b.expiresOn,10);
@@ -305,8 +261,8 @@ async function noticesRoute(request,env,path,method,ctx){
   const match=path.match(/^\/api\/notices\/([^/]+)$/);
   if(match){
     const id=lookupId(match[1]);if(!await canManageNotices(env,user))fail(403,'You do not have permission to manage notices.');
-    const current=await db(env,'SELECT id,image_key AS imageKey FROM notices WHERE id=?',id).first();if(!current)fail(404,'Notice not found.');
-    if(method==='DELETE'){if(current.imageKey&&env.NOTICE_BUCKET)await env.NOTICE_BUCKET.delete(current.imageKey);await db(env,'DELETE FROM notices WHERE id=?',id).run();await audit(env,user.id,'notice.deleted','notice',id);return json({ok:true});}
+    const current=await db(env,'SELECT id FROM notices WHERE id=?',id).first();if(!current)fail(404,'Notice not found.');
+    if(method==='DELETE'){await db(env,'DELETE FROM notices WHERE id=?',id).run();await audit(env,user.id,'notice.deleted','notice',id);return json({ok:true});}
     if(method==='PATCH'){
       const b=await jsonBody(request),title=requiredText(b,'title','Notice title',180),body=requiredText(b,'body','Notice text',5000),visibility=trim(b.visibility,20)||'all',pinned=b.pinned===true||b.pinned==='true'?1:0,expiresOn=trim(b.expiresOn,10);
       if(!['all','students','staff'].includes(visibility))fail(400,'Notice visibility is invalid.');if(expiresOn&&!dateOk(expiresOn))fail(400,'Notice expiry date is invalid.');

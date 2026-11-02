@@ -66,7 +66,7 @@
   }
 
   function noticeCard(notice, canManage = false) {
-    return `<article class="notice-card ${notice.pinned ? 'is-pinned' : ''}"><div class="notice-card-head"><h3>${esc(notice.title)}</h3>${notice.pinned ? badge('IMPORTANT','warn') : ''}</div>${notice.imageUrl ? `<img class="notice-image" src="${esc(notice.imageUrl)}" alt="${esc(notice.title)}" loading="lazy">` : ''}<p class="notice-body">${esc(notice.body)}</p><div class="notice-meta"><span>${esc(notice.authorName || 'College')}</span><time>${fmtDate((notice.publishedAt || '').slice(0,10))}</time>${notice.expiresAt ? `<small>Until ${fmtDate(notice.expiresAt.slice(0,10))}</small>` : ''}</div>${canManage ? `<div class="row-actions"><button class="button small soft" data-action="notice-edit" data-id="${esc(notice.id)}">Edit</button><button class="button small danger" data-action="notice-delete" data-id="${esc(notice.id)}">Delete</button></div>` : ''}</article>`;
+    return `<article class="notice-card ${notice.pinned ? 'is-pinned' : ''}"><div class="notice-card-head"><h3>${esc(notice.title)}</h3>${notice.pinned ? badge('IMPORTANT','warn') : ''}</div><p class="notice-body">${esc(notice.body)}</p><div class="notice-meta"><span>${esc(notice.authorName || 'College')}</span><time>${fmtDate((notice.publishedAt || '').slice(0,10))}</time>${notice.expiresAt ? `<small>Until ${fmtDate(notice.expiresAt.slice(0,10))}</small>` : ''}</div>${canManage ? `<div class="row-actions"><button class="button small soft" data-action="notice-edit" data-id="${esc(notice.id)}">Edit</button><button class="button small danger" data-action="notice-delete" data-id="${esc(notice.id)}">Delete</button></div>` : ''}</article>`;
   }
 
   function noticePanel(notices, compact = false) {
@@ -217,18 +217,14 @@
   async function noticeForm(id = '') {
     const data = id ? await api('/api/notices?manage=1') : null, notice = data?.notices.find(item => item.id === id);
     if (id && !notice) return;
-    const content = field('title','Notice title','text',notice?.title || '','required maxlength="180"') + textareaField('body','Description',notice?.body || '','required maxlength="5000" rows="6"') + selectField('visibility','Visible to',[{value:'all',label:'Everyone'},{value:'students',label:'Students'},{value:'staff',label:'Teachers, moderators, and owners'}],notice?.visibility || 'all','required') + field('expiresOn','Expiry date (optional)','date',notice?.expiresAt?.slice(0,10) || '') + `<label class="field">Notice image (JPEG, PNG, or WebP · max 5 MB)<input name="image" type="file" accept="image/jpeg,image/png,image/webp"></label>${notice?.imageUrl ? `<label class="permission notice-pin"><input type="checkbox" name="removeImage" value="true"><span>Remove current image</span></label>` : ''}<label class="permission notice-pin"><input type="checkbox" name="pinned" value="true" ${notice?.pinned ? 'checked' : ''}><span>Mark as important and pin near the top</span></label><p class="mobile-note">Images are stored in the college R2 bucket. Uploads are limited to 5 MB and checked against their file signatures.</p>`;
+    const content = field('title','Notice title','text',notice?.title || '','required maxlength="180"') + textareaField('body','Description',notice?.body || '','required maxlength="5000" rows="6"') + selectField('visibility','Visible to',[{value:'all',label:'Everyone'},{value:'students',label:'Students'},{value:'staff',label:'Teachers, moderators, and owners'}],notice?.visibility || 'all','required') + field('expiresOn','Expiry date (optional)','date',notice?.expiresAt?.slice(0,10) || '') + `<label class="permission notice-pin"><input type="checkbox" name="pinned" value="true" ${notice?.pinned ? 'checked' : ''}><span>Mark as important and pin near the top</span></label><p class="mobile-note">Notices are text-only in this free deployment.</p>`;
     const values = await modalForm(id ? 'Edit notice' : 'Publish notice',content,id ? 'Save changes' : 'Publish');
     if (!values) return;
-    const file=values.image instanceof File && values.image.size ? values.image : null, removeImage=Boolean(values.removeImage);values.pinned=Boolean(values.pinned);delete values.image;delete values.removeImage;
-    let noticeId=id;
     try {
       if(id) await api(`/api/notices/${encodeURIComponent(id)}`,{method:'PATCH',body:values});
-      else noticeId=(await api('/api/notices',{method:'POST',body:values})).id;
-      if(removeImage&&!file) await api(`/api/notices/${encodeURIComponent(noticeId)}/image`,{method:'DELETE'});
-      if(file){if(file.size>5*1024*1024)throw new Error('Images must be 5 MB or smaller.');const response=await fetch(`/api/notices/${encodeURIComponent(noticeId)}/image`,{method:'PUT',headers:{'Content-Type':file.type,'X-CSRF-Token':state.csrf},body:file,credentials:'same-origin'});const result=await response.json().catch(()=>({error:'Image upload failed.'}));if(!response.ok)throw new Error(result.error||`Image upload failed (${response.status}).`);}
+      else await api('/api/notices',{method:'POST',body:values});
       toast(id ? 'Notice updated' : 'Notice published');await stateRender('notices');
-    } catch (error) { toast(noticeId&&!id ? `Notice saved, but its image could not be uploaded: ${error.message}` : error.message);if(noticeId)await stateRender('notices'); }
+    } catch (error) { toast(error.message); }
   }
 
   async function stateRender(view) { state.view = view; await window.render(); }

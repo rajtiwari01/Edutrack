@@ -17,10 +17,6 @@ database_name = "college-attendance"
 database_id = "24ad4cea-0fdb-4c38-9e0d-0fd762854b63"
 migrations_dir = "./migrations"
 
-[[r2_buckets]]
-binding = "NOTICE_BUCKET"
-bucket_name = "edutrack-notices"
-
 [observability]
 enabled = true
 

@@ -81,6 +81,28 @@ const studentAuth = await login({ ...studentLogin, accessCode: studentCreated.re
 const studentDenied = await request('/api/students', { auth: studentAuth });
 assert.equal(studentDenied.response.status, 403, 'Student reached student-management APIs.');
 
+const noticeTitle = `Local QA Notice ${suffix}`;
+const noticeCreated = await request('/api/notices', {
+  method: 'POST', auth: teacherAuth,
+  body: { title: noticeTitle, body: 'Text-only notice test.', visibility: 'students', pinned: true }
+});
+assert.equal(noticeCreated.response.status, 201, 'Teacher could not publish a text-only notice.');
+const studentNotices = await request('/api/notices', { auth: studentAuth });
+assert.ok(studentNotices.result.notices?.some(item => item.id === noticeCreated.result.id && item.title === noticeTitle), 'Student could not read the notice addressed to students.');
+const studentNoticeAdmin = await request('/api/notices?manage=1', { auth: studentAuth });
+assert.equal(studentNoticeAdmin.response.status, 403, 'Student reached notice-management APIs.');
+const imageRoute = await request(`/api/notices/${encodeURIComponent(noticeCreated.result.id)}/image`, { auth: studentAuth });
+assert.equal(imageRoute.response.status, 404, 'The no-R2 deployment unexpectedly exposed a notice-image route.');
+const noticeUpdated = await request(`/api/notices/${encodeURIComponent(noticeCreated.result.id)}`, {
+  method: 'PATCH', auth: teacherAuth,
+  body: { title: noticeTitle, body: 'Updated text-only notice.', visibility: 'all', pinned: false }
+});
+assert.equal(noticeUpdated.response.status, 200, 'Teacher could not edit a notice.');
+const managedNotices = await request('/api/notices?manage=1', { auth: teacherAuth });
+assert.ok(managedNotices.result.notices?.some(item => item.id === noticeCreated.result.id && item.body === 'Updated text-only notice.'), 'Notice edit did not persist.');
+const noticeDeleted = await request(`/api/notices/${encodeURIComponent(noticeCreated.result.id)}`, { method: 'DELETE', auth: teacherAuth });
+assert.equal(noticeDeleted.response.status, 200, 'Teacher could not delete a notice.');
+
 const weekday = new Date(`${today}T00:00:00Z`).getUTCDay();
 const routine = await request('/api/routines', {
   method: 'POST', auth: teacherAuth,
@@ -163,4 +185,4 @@ assert.equal(revokedLogin.response.status, 401, 'A revoked QR login token was ac
 
 const security = await request('/');
 assert.equal(security.response.headers.get('x-frame-options'), 'DENY', 'The app response is missing X-Frame-Options.');
-process.stdout.write('Local API smoke passed: owner, teacher, moderator, and student login; role checks; optional registration; routines/recess; classroom and attendance; reports; QR issue/use/replay/revoke; and security headers.\n');
+process.stdout.write('Local API smoke passed: owner, teacher, moderator, and student login; role checks; optional registration; text notice create/read/edit/delete; routines/recess; classroom and attendance; reports; QR issue/use/replay/revoke; and security headers.\n');
