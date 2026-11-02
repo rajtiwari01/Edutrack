@@ -2,7 +2,8 @@ const TENANT_TABLES = new Set([
   'users', 'departments', 'branches', 'courses', 'semesters', 'academic_sessions',
   'student_profiles', 'subjects', 'enrollments', 'class_sessions', 'attendance',
   'moderator_permissions', 'web_sessions', 'student_access_codes', 'audit_logs',
-  'class_routines', 'routine_periods', 'college_holidays'
+  'class_routines', 'routine_periods', 'college_holidays', 'teacher_accounts', 'notices',
+  'student_qr_tokens', 'push_subscriptions', 'push_outbox'
 ]);
 
 const RESERVED = new Set([

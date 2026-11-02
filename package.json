@@ -5,11 +5,18 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "check": "node --check src/index.js && node --check src/tenant.js && node --check public/app.js && node --check public/notifications.js && node --check public/pwa.js && node --check public/sw.js",
+    "check": "node --check src/index.js && node --check src/tenant.js && node --check src/webpush.js && node --check public/app.js && node --check public/roles.js && node --check public/notifications.js && node --check public/pwa.js && node --check public/sw.js && node --check scripts/local-api-smoke.mjs && node --check tests/webpush.test.js",
+    "test": "node --test",
+    "test:local": "node scripts/local-api-smoke.mjs",
+    "vapid:generate": "node scripts/generate-vapid.mjs",
     "db:local": "wrangler d1 migrations apply college-attendance --local",
     "db:remote": "wrangler d1 migrations apply college-attendance --remote"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"
+  },
+  "dependencies": {
+    "jsqr": "^1.4.0",
+    "qrcode-generator": "^2.0.4"
   }
 }

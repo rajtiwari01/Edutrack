@@ -272,6 +272,48 @@ summary { min-height: 38px; padding: 8px 0; color: var(--accent); cursor: pointe
   .dialog-actions { flex-wrap: wrap; }
 }
 
+.notice-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px; }
+.notice-card { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface-soft); }
+.notice-card.is-pinned { border-color: color-mix(in srgb, var(--orange) 42%, var(--line)); background: color-mix(in srgb, var(--orange) 5%, var(--surface)); }
+.notice-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.notice-card h3 { margin: 0; font-size: 1rem; letter-spacing: -.02em; }
+.notice-body { margin: 10px 0 14px; color: var(--text); white-space: pre-wrap; line-height: 1.55; overflow-wrap: anywhere; }
+.notice-meta { display: flex; flex-wrap: wrap; gap: 6px 12px; color: var(--muted); font-size: .73rem; }
+.notice-meta time { font-variant-numeric: tabular-nums; }
+.notice-card .row-actions { margin-top: 12px; }
+.notice-pin { justify-content: flex-start; }
+.notice-pin input { width: 18px; height: 18px; accent-color: var(--accent); }
+.teacher-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.routine-week { display: grid; gap: 12px; }
+.routine-day-row { display: grid; grid-template-columns: minmax(145px, 190px) minmax(0, 1fr); align-items: stretch; gap: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow); scroll-margin-top: 18px; }
+.routine-day-label { display: grid; align-content: center; gap: 4px; padding: 4px 8px; }
+.routine-day-label .eyebrow, .routine-day-label h3 { margin: 0; }
+.routine-day-label h3 { font-size: 1.04rem; }
+.routine-day-label span { color: var(--muted); font-size: .74rem; }
+.routine-horizontal-scroll { min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; }
+.routine-track { display: flex; align-items: stretch; gap: 10px; min-height: 100%; }
+.timetable-cell { display: flex; flex: 0 0 190px; min-width: 0; flex-direction: column; align-items: flex-start; gap: 8px; padding: 14px; border: 1px solid color-mix(in srgb, var(--accent) 17%, var(--line)); border-radius: 14px; background: color-mix(in srgb, var(--accent-soft) 42%, var(--surface)); }
+.timetable-cell strong { font-size: .9rem; line-height: 1.35; }
+.timetable-cell > span, .timetable-cell > small { color: var(--muted); font-size: .76rem; }
+.timetable-time { color: var(--accent); font-size: .78rem; font-weight: 750; font-variant-numeric: tabular-nums; }
+.timetable-cell.is-recess { border-color: color-mix(in srgb, var(--orange) 44%, var(--line)); background: color-mix(in srgb, var(--orange) 9%, var(--surface)); }
+.timetable-cell.is-recess .timetable-time { color: var(--orange); }
+.routine-empty { display: flex; flex: 1 0 190px; min-height: 94px; align-items: center; justify-content: center; border: 1px dashed var(--line); border-radius: 14px; color: var(--muted); font-size: .82rem; }
+.routine-jump { display: flex; overflow-x: auto; margin-bottom: 12px; }
+.routine-jump .weekday-button { flex: 0 0 64px; }
+.qr-preview { display: grid; place-items: center; padding: 16px; border: 1px solid var(--line); border-radius: 15px; background: #fff; }
+.qr-preview img { width: min(280px, 72vw); height: auto; image-rendering: pixelated; }
+.qr-scanner video { display: block; width: 100%; max-height: 52dvh; aspect-ratio: 4 / 3; border-radius: 14px; background: #10151d; object-fit: cover; }
+
+@media (max-width: 640px) {
+  .routine-day-row { grid-template-columns: 1fr; gap: 9px; padding: 12px; }
+  .routine-day-label { grid-template-columns: 1fr auto; align-items: center; padding: 2px 3px; }
+  .routine-day-label .eyebrow { grid-column: 1 / -1; }
+  .routine-day-label span { grid-row: 2; grid-column: 2; }
+  .timetable-cell { flex-basis: min(220px, 74vw); }
+  .teacher-card { align-items: flex-start; flex-direction: column; }
+}
+
 @media (max-width: 380px) {
   .topbar { padding-inline: 9px; }
   .brand-mark { flex-basis: 35px; width: 35px; height: 35px; }

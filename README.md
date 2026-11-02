@@ -1,41 +1,87 @@
 # Edutrack
 
-Edutrack is a Cloudflare Workers app for college attendance and academic management. The existing HTML, CSS, JavaScript, Worker, authentication, permissions, and D1 setup are retained.
+Edutrack is a Cloudflare Workers college management app backed by Cloudflare D1. It keeps the existing account, attendance, academic, and routine tables and adds isolated teacher, notice, QR-login, and Web Push features.
 
-## Features
+## Workspaces and features
 
-- Owner, moderator, and student workspaces with server-checked roles and permissions.
-- Student and academic record management, subject enrollments, attendance history, and audit records.
-- Responsive weekly timetable with class periods and highlighted recess entries.
-- Live classrooms for authorized owners and moderators. Each mark is saved immediately; ending a classroom records remaining enrolled students as absent.
-- Attendance summaries, date and subject filters, student history, monthly trends, and UTF-8 CSV exports that open in Excel.
-- In-app classroom notifications and optional browser alerts while Edutrack is open. This project does not implement push delivery to a closed browser.
-- Installable app shell. The service worker caches public shell assets only; `/api/` requests and student records remain network-only.
+- Role based workspaces for owners, teachers, moderators, and students. Teacher identity is additive in `teacher_accounts`; existing `users.role` values and moderator permissions remain intact.
+- Student, course, subject, attendance, classroom, history, export, and audit workflows backed by D1.
+- Optional student registration numbers. Internal student IDs remain the record keys.
+- Single-use student QR login codes stored as hashes, with a five minute expiry, explicit sign-in action, and rate-limited verification.
+- Weekly horizontal timetable with chronological periods, class details, and visually distinct recess periods.
+- College notices with audience, expiry, pinned status, and JPEG/PNG/WebP image uploads stored in R2.
+- Web Push subscriptions per user and device, classroom/notice push events, invalid subscription cleanup, and retry queue.
+- Installable PWA shell. The service worker caches only public shell assets; API responses and private student data are network-only.
 
 ## Database safety
 
-The classroom and reporting updates use the existing `class_sessions`, `attendance`, `audit_logs`, and `routine_periods` tables. Recess is represented within the existing routine-period fields. This update adds no D1 tables, columns, indexes, or migrations, and it adds no package dependencies.
+Migrations `0003_teacher_notices_qr_push.sql` and `0004_teacher_access_code_guard.sql` are forward-only. Migration 0003 creates new tables and indexes. Migration 0004 replaces the existing student access-code tenant guard so same-college teacher identities can manage student access codes while preserving the owner and same-college checks. Neither migration drops or rebuilds tables or columns, or deletes existing records, IDs, or relationships. The existing registration number column is already nullable and unique, so no schema change is needed for optional values. Migrations are not applied automatically by deployment.
 
-Keep the existing database, migration history, D1 binding, and database ID in `wrangler.toml`. No database command or migration is required for this update. `npm run deploy` deploys the Worker and public assets; it does not apply D1 migrations. Avoid `npm run db:remote` as part of this update.
+Before applying them to production, inspect both migrations and take a D1 backup. Then apply them as a separately reviewed operation:
 
-For local development only, `npm run db:local` applies the repository migrations to the local Wrangler D1 database. Never point a development command at production unless you have separately reviewed and authorized the exact change.
+```sh
+npx wrangler d1 migrations apply college-attendance --remote
+```
 
-## Local development
+Keep the current database name and ID in `wrangler.toml`. Do not run `npm run db:local` against production. That script is for a local Wrangler D1 database only.
+
+## Local setup
 
 1. Install Node.js and run `npm install`.
-2. Copy `.dev.vars.example` to `.dev.vars` for local-only variables. Keep real secrets in `.dev.vars`; do not commit it.
-3. Run `npm run db:local` only when setting up a fresh local D1 database.
-4. Run `npm run dev` and open the local URL printed by Wrangler.
-5. Run `npm run check` to check JavaScript syntax.
+2. Copy `.dev.vars.example` to `.dev.vars` and fill in local-only values. Never commit `.dev.vars`.
+3. Apply migrations to the local D1 emulator with `npm run db:local`.
+4. Start the app with `npm run dev`.
+5. Run `npm run check` for JavaScript syntax checks.
 
-Cloudflare deployment settings and the D1 binding are in `wrangler.toml`. Preserve the existing database ID, project name, timezone, and bindings when connecting or deploying through GitHub.
+Local image storage uses Wrangler's local R2 emulator. The bucket binding is declared in `wrangler.toml` as `NOTICE_BUCKET`.
+
+## Cloudflare setup
+
+### R2 notices bucket
+
+Create the production bucket once:
+
+```sh
+npx wrangler r2 bucket create edutrack-notices
+```
+
+The existing Worker config binds this bucket as `NOTICE_BUCKET`. Notice images accept JPEG, PNG, and WebP only, are limited to 5 MB, are signature-checked, and are served through an authenticated same-origin route. Do not make the bucket public.
+
+### Web Push keys
+
+Generate a VAPID pair locally:
+
+```sh
+npm run vapid:generate
+```
+
+Set both generated values as Worker secrets (do not commit them):
+
+```sh
+npx wrangler secret put VAPID_PUBLIC_KEY
+npx wrangler secret put VAPID_PRIVATE_KEY
+```
+
+The `VAPID_SUBJECT` value in `wrangler.toml` should be changed to a monitored `mailto:` address for the college. For local testing, put the generated public/private keys and a contact address in `.dev.vars`. The public key is returned to signed-in clients by the Worker; the private key stays server-side.
+
+Users must grant notification permission and enable push separately on each device. Push requires HTTPS and a browser that supports the Push API and service workers. iOS support requires an installed home-screen web app on a compatible iOS version. Unsupported browsers keep in-app updates while Edutrack is open. Delivery to real devices must be verified after deployment with an actual subscription; local syntax/build checks do not prove a push provider delivered a notification.
+
+### Production deployment
+
+After reviewing and applying migration 0003, creating the R2 bucket, setting VAPID values, and checking the production `VAPID_SUBJECT`, deploy through the existing GitHub/Cloudflare workflow or run `npm run deploy`. The Worker cron schedule retries pending push deliveries every five minutes. Deployment does not apply D1 migrations automatically.
+
+## QR login behavior
+
+Owners and teachers can issue a QR code from student management. A code contains only a cryptographically random one-time token, whose SHA-256 hash is stored in D1. It expires after five minutes, is consumed once, and is invalidated when revoked or replaced. Scanning only fills the sign-in code; the user must explicitly continue. QR management is not available to moderators or students.
+
+## Private app indexing and PWA
+
+The application is deliberately marked `noindex,nofollow`; `robots.txt` excludes API routes. There are no public college pages for a sitemap or canonical listing. The page has a title, description, Open Graph metadata, manifest, icons, and service worker. Keep private dashboards and API data out of public caches.
 
 ## GitHub upload
 
-Include the application source, `public/`, `migrations/`, `package.json`, `package-lock.json`, `.dev.vars.example`, `.gitignore`, `README.md`, and `wrangler.toml`. Keep the original attendance HTML file if you want to retain it in the repository; the Worker serves the app in `public/`.
+Include source files, `public/`, `migrations/`, `scripts/`, `package.json`, `package-lock.json`, `.dev.vars.example`, `.gitignore`, `README.md`, and `wrangler.toml`. Do not upload `.dev.vars`, `.wrangler/`, `node_modules/`, `.git/`, or local database exports. Preserve the existing Cloudflare project and D1 database identifiers.
 
-Do not upload `.dev.vars`, `.wrangler/`, `node_modules/`, `.git/`, or the local `database/` export folder. `.gitignore` excludes these local files. Keep `.dev.vars.example` as the safe template.
+## Validation
 
-## Notifications and attendance recovery
-
-Classroom status and marks are stored in the existing D1 session, attendance, and audit records. A refresh reloads saved marks from D1. Browser alerts require the user to enable them from the notification panel; they work only while the site is open. Students can view relevant live classroom information but cannot mark, edit, or export other students' attendance.
+`npm run check` runs `node --check` on the Worker and browser JavaScript. `npm test` validates VAPID signing, Web Push payload framing, and malformed subscription handling with a stubbed provider request. After starting a local Worker and applying local migrations, `npm run test:local` exercises role login/denial, optional registration numbers, routine/recess storage, classroom start/end, attendance history/calculations, and QR issue/use/replay/revoke. It creates a uniquely named QA college and leaves those test records in local D1; it refuses any non-local URL. `npm run deploy -- --dry-run` builds the Worker/assets without publishing. Production login, provider delivery, and mobile camera behavior still require testing with existing production accounts and real devices after the reviewed deployment steps. A successful crypto test is not proof of delivery to a real notification service.

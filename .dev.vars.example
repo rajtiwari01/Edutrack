@@ -1,3 +1,6 @@
 # Keep this secret only for recovery of the existing legacy OWNER.
 # Newly registered colleges receive their own one-time recovery code.
 OWNER_RECOVERY_KEY=replace-with-a-long-random-legacy-owner-recovery-key
+VAPID_PUBLIC_KEY=replace-with-the-generated-base64url-public-key
+VAPID_PRIVATE_KEY=replace-with-the-generated-base64url-private-key
+VAPID_SUBJECT=mailto:admin@example.edu

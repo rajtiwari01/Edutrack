@@ -21,6 +21,9 @@
   <title>Edutrack — College Attendance</title>
   <link rel="stylesheet" href="/styles.css">
   <script src="/app.js" defer></script>
+  <script src="/vendor/qrcode-generator.js" defer></script>
+  <script src="/vendor/jsQR.js" defer></script>
+  <script src="/roles.js" defer></script>
   <script src="/notifications.js" defer></script>
   <script src="/pwa.js" defer></script>
 </head>
@@ -38,6 +41,7 @@
           <div id="notification-list" class="notification-list"><p class="empty">You’re all caught up.</p></div>
           <button id="notification-mark-read" class="button quiet notification-mark-read" type="button" hidden>Mark all as read</button>
           <button id="notification-enable" class="button soft notification-enable" type="button" hidden>Enable browser notifications</button>
+          <button id="notification-disable" class="button quiet notification-enable" type="button" hidden>Disable push on this device</button>
           <p id="notification-permission-note" class="notification-permission-note" aria-live="polite"></p>
         </section>
       </div>
