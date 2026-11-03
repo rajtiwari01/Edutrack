@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "check": "node --check src/index.js && node --check src/tenant.js && node --check src/webpush.js && node --check public/app.js && node --check public/roles.js && node --check public/notifications.js && node --check public/pwa.js && node --check public/sw.js && node --check scripts/local-api-smoke.mjs && node --check tests/webpush.test.js",
+    "check": "node --check src/index.js && node --check src/tenant.js && node --check src/webpush.js && node --check public/app.js && node --check public/roles.js && node --check public/notifications.js && node --check public/pwa.js && node --check public/sw.js && node --check scripts/local-api-smoke.mjs && node --check tests/webpush.test.js && node --check tests/submit-behavior.test.js",
     "test": "node --test",
     "test:local": "node scripts/local-api-smoke.mjs",
     "vapid:generate": "node scripts/generate-vapid.mjs",

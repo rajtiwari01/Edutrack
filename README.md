@@ -15,13 +15,15 @@ Edutrack is a Cloudflare Workers college management app backed by Cloudflare D1.
 
 ## Database safety
 
-Migrations `0003_teacher_notices_qr_push.sql` and `0004_teacher_access_code_guard.sql` are forward-only. Migration 0003 creates new tables and indexes. Migration 0004 replaces the existing student access-code tenant guard so same-college teacher identities can manage student access codes while preserving the owner and same-college checks. Neither migration drops or rebuilds tables or columns, or deletes existing records, IDs, or relationships. The existing registration number column is already nullable and unique, so no schema change is needed for optional values. Migrations are not applied automatically by deployment.
+Migrations `0003_teacher_notices_qr_push.sql` and `0004_teacher_access_code_guard.sql` have already been applied to production. Do not edit or rerun them. Migration `0005_branch_aware_academics.sql` adds a course-to-branches relationship and branch scope to subjects and routines. It preserves existing student, subject, routine, enrollment, and attendance records. Existing combined branch names remain as one branch row; the migration does not guess how to split or remap them. The existing registration number column is nullable and unique. Migrations are not applied automatically by deployment.
 
-Before applying them to production, inspect both migrations and take a D1 backup. Then apply them as a separately reviewed operation:
+Apply migration 0005 to the local D1 emulator when setting up a local copy. For production, back up D1 and apply only the pending migration after reviewing its SQL:
 
 ```sh
 npx wrangler d1 migrations apply college-attendance --remote
 ```
+
+To represent a combined legacy branch as separate choices, first confirm the real mapping with the college administrator. Create each branch as a separate row under its department, then use the course's **Branches** action to assign the confirmed branches. Existing student profile assignments stay unchanged; old subjects and routines remain unassigned/shared until an administrator confirms their scope and updates them. Do not delete the legacy combined branch while student profiles still reference it.
 
 Keep the current database name and ID in `wrangler.toml`. Do not run `npm run db:local` against production. That script is for a local Wrangler D1 database only.
 
@@ -66,7 +68,7 @@ Users must grant notification permission and enable push separately on each devi
 
 ### Production deployment
 
-After reviewing and applying migrations 0003 and 0004, setting VAPID values, and checking the production `VAPID_SUBJECT`, deploy through the existing GitHub/Cloudflare workflow or run `npm run deploy`. No R2 bucket is required. The Worker cron schedule retries pending push deliveries every five minutes. Deployment does not apply D1 migrations automatically.
+After migration 0005 is applied to production, setting VAPID values, and checking the production `VAPID_SUBJECT`, deploy through the existing GitHub/Cloudflare workflow or run `npm run deploy`. No R2 bucket is required. The Worker cron schedule retries pending push deliveries every five minutes. Deployment does not apply D1 migrations automatically.
 
 ## QR login behavior
 
@@ -82,4 +84,4 @@ Include source files, `public/`, `migrations/`, `scripts/`, `package.json`, `pac
 
 ## Validation
 
-`npm run check` runs `node --check` on the Worker and browser JavaScript. `npm test` validates VAPID signing, Web Push payload framing, and malformed subscription handling with a stubbed provider request. After starting a local Worker and applying local migrations, `npm run test:local` exercises role login/denial, optional registration numbers, routine/recess storage, classroom start/end, attendance history/calculations, and QR issue/use/replay/revoke. It creates a uniquely named QA college and leaves those test records in local D1; it refuses any non-local URL. `npm run deploy -- --dry-run` builds the Worker/assets without publishing. Production login, provider delivery, and mobile camera behavior still require testing with existing production accounts and real devices after the reviewed deployment steps. A successful crypto test is not proof of delivery to a real notification service.
+`npm run check` runs `node --check` on the Worker, browser JavaScript, and smoke tests. `npm test` covers request/form loading behavior, error handling, VAPID signing, Web Push payload framing, and malformed subscription handling with stubbed requests. After starting a local Worker and applying local migrations, `npm run test:local` exercises role login/denial, optional registration numbers, multiple branches per course, branch-scoped subject uniqueness and enrollment, routine/recess storage, classroom start/end, attendance history/calculations, and QR issue/use/replay/revoke. It creates a uniquely named QA college and leaves those test records in local D1; it refuses any non-local URL. `npm run deploy -- --dry-run` builds the Worker/assets without publishing. Production login, provider delivery, and mobile camera behavior still require testing with existing production accounts and real devices after the reviewed deployment steps. A successful crypto test is not proof of delivery to a real notification service.

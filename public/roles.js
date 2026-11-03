@@ -40,6 +40,8 @@
   }
 
   function renderLogin() {
+    document.querySelector('#nav-menu-button').hidden = true;
+    if (window.setSidebarOpen) window.setSidebarOpen(false);
     document.querySelector('#identity').hidden = true;
     document.querySelector('#logout').hidden = true;
     document.querySelector('#college-name').textContent = 'College academic platform';
@@ -53,8 +55,9 @@
 
   async function login(event) {
     event.preventDefault();
-    const form = event.currentTarget, submit = form.querySelector('button[type=submit],button:not([type])');
-    submit.disabled = true;
+    const form=event.currentTarget,submit=form.querySelector('button[type=submit],button:not([type])'),originalText=submit.textContent;
+    submit.disabled=true;submit.textContent='Signing in…';
+
     try {
       const credentials = Object.fromEntries(new FormData(form));
       credentials.role = state.loginRole || 'OWNER';
@@ -62,7 +65,7 @@
       state.user = result.user; state.csrf = result.csrf;
       await original.loadDashboard();
     } catch (error) { toast(error.message); }
-    finally { submit.disabled = false; }
+    finally { if(submit.isConnected){submit.disabled=false;submit.textContent=originalText;} }
   }
 
   function noticeCard(notice, canManage = false) {
@@ -130,13 +133,13 @@
   async function viewSubjects() {
     if (state.user.role === 'MODERATOR') return original.viewSubjects();
     const data = await api('/api/academics');
-    return `<div class="section-title"><h2>Subjects</h2>${button('Add subject','new-subject','primary')}</div>${data.subjects.length ? table(['Subject','Code','Department','Course / semester','Teacher','Status','Actions'],data.subjects.map(subject => `<tr><td>${esc(subject.name)}</td><td>${esc(subject.code)}</td><td>${esc(subject.departmentName)}</td><td>${esc([subject.courseName,subject.semesterName].filter(Boolean).join(' · ') || '—')}</td><td>${esc(subject.facultyName || '—')}</td><td>${subject.active ? 'Active' : 'Inactive'}</td><td><div class="row-actions"><button class="button small soft" data-action="subject-edit" data-id="${esc(subject.id)}">Edit</button><button class="button small soft" data-action="subject-enrollments" data-id="${esc(subject.id)}">Enroll students</button></div></td></tr>`)) : empty('No subjects yet')}`;
+    return `<div class="section-title"><h2>Subjects</h2>${button('Add subject','new-subject','primary')}</div>${data.subjects.length ? table(['Subject','Code','Branch','Department','Course / semester','Teacher','Status','Actions'],data.subjects.map(subject => `<tr><td>${esc(subject.name)}</td><td>${esc(subject.code)}</td><td>${esc(subject.branchName||'Shared')}</td><td>${esc(subject.departmentName)}</td><td>${esc([subject.courseName,subject.semesterName].filter(Boolean).join(' · ') || '—')}</td><td>${esc(subject.facultyName || '—')}</td><td>${subject.active ? 'Active' : 'Inactive'}</td><td><div class="row-actions"><button class="button small soft" data-action="subject-edit" data-id="${esc(subject.id)}">Edit</button><button class="button small soft" data-action="subject-enrollments" data-id="${esc(subject.id)}">Enroll students</button></div></td></tr>`)) : empty('No subjects yet')}`;
   }
 
   function routineCell(period, edit, index, count) {
     const recess = period.periodType === 'break';
     const actions = edit ? `<div class="row-actions"><button class="button small soft" data-action="routine-edit" data-id="${esc(period.periodId)}">Edit</button><button class="button small danger" data-action="routine-delete" data-id="${esc(period.periodId)}">Delete</button></div>` : '';
-    return `<article class="timetable-cell ${recess ? 'is-recess' : ''}"><div class="timetable-time">${esc(period.startsAt)}–${esc(period.endsAt)}</div><strong>${recess ? badge('RECESS','recess-badge') : esc(period.subjectName)}</strong><span>${recess ? 'Break' : esc(period.facultyName || 'Faculty TBA')}</span>${period.roomNumber ? `<small>${esc(period.roomNumber)}</small>` : ''}${actions}</article>`;
+    return `<article class="timetable-cell ${recess ? 'is-recess' : ''}"><div class="timetable-time">${esc(period.startsAt)}–${esc(period.endsAt)}</div><strong>${recess ? badge('RECESS','recess-badge') : esc(period.subjectName)}</strong><span>${recess ? 'Break' : esc(period.facultyName || 'Faculty TBA')}</span>${[period.courseName,period.branchName,period.section].filter(Boolean).length?`<small>${esc([period.courseName,period.branchName,period.section].filter(Boolean).join(' · '))}</small>`:''}${period.roomNumber ? `<small>${esc(period.roomNumber)}</small>` : ''}${actions}</article>`;
   }
 
   async function viewRoutines() {
@@ -151,28 +154,28 @@
 
   async function viewReports() {
     if (state.user.role !== 'TEACHER') return original.viewReports();
-    const data = await api('/api/reports');
-    return `<div class="section-title"><div><p class="eyebrow">Teaching workspace</p><h2>Attendance analytics</h2></div>${button('Download CSV','export-reports','soft')}</div><div class="grid">${stat('Overall attendance',data.percentage == null ? '—' : `${data.percentage}%`,'Present marks across held classes')}${stat('Classes held',data.held)}${stat('Present',data.present)}${stat('Absent',data.absent)}<article class="card span-12"><h2>Attendance by subject</h2>${data.subjects.length ? table(['Subject','Code','Classes','Present','Attendance'],data.subjects.map(subject => `<tr><td>${esc(subject.name)}</td><td>${esc(subject.code)}</td><td>${subject.held}</td><td>${subject.present}</td><td>${subject.percentage == null ? '—' : `${subject.percentage}%`}</td></tr>`)) : empty('No attendance data yet')}</article></div>`;
+    const filters=state.reportFilters||{},options=await api('/api/attendance/options'),branches=[...new Map((options.subjects||[]).filter(subject=>subject.branchId).map(subject=>[subject.branchId,{value:subject.branchId,label:subject.branchName||subject.branchId}])).values()],query=filters.branchId?'?branchId='+encodeURIComponent(filters.branchId):'',data=await api('/api/reports'+query);
+    const filter='<form id="report-filter" class="filter-form">'+selectField('branchId','Branch',[{value:'',label:'All branches'},...branches],filters.branchId||'')+'<button type="submit" class="button primary">Apply branch filter</button><button type="button" class="button soft" data-classroom-action="export-reports">Download filtered CSV</button></form>';
+    const rows=data.subjects.map(subject=>'<tr><td>'+esc(subject.name)+'</td><td>'+esc(subject.code)+'</td><td>'+esc(subject.branchName||'Shared')+'</td><td>'+subject.held+'</td><td>'+subject.present+'</td><td>'+(subject.percentage==null?'—':subject.percentage+'%')+'</td></tr>').join('');
+    return '<div class="section-title"><div><p class="eyebrow">Teaching workspace</p><h2>Attendance analytics</h2></div>'+button('Download CSV','export-reports','soft')+'</div>'+filter+'<div class="grid">'+stat('Overall attendance',data.percentage==null?'—':data.percentage+'%','Present marks across held classes')+stat('Classes held',data.held)+stat('Present',data.present)+stat('Absent',data.absent)+'<article class="card span-12"><h2>Attendance by subject</h2>'+(rows?table(['Subject','Code','Branch','Classes','Present','Attendance'],rows):empty('No attendance data yet'))+'</article></div>';
   }
-
   async function createStudent() {
-    const data = await api('/api/academics');
-    const content = field('fullName','Full name','text','','required') + field('username','Username','text','','required minlength="3"') + field('password','Initial password','password','','required minlength="12" autocomplete="new-password"') + field('rollNumber','Roll number','text','','required') + field('registrationNumber','Registration number (optional)') + selectField('departmentId','Department',data.departments.map(item => ({value:item.id,label:item.name})),'','required') + selectField('branchId','Branch',data.branches.map(item => ({value:item.id,label:`${item.name} · ${item.departmentName}`}))) + selectField('courseId','Course',data.courses.map(item => ({value:item.id,label:`${item.name} · ${item.departmentName}`})),'','required') + field('semesterOrdinal','Semester number','number','','required min="1"') + selectField('academicSessionId','Academic session',data.sessions.filter(item => item.status === 'active').map(item => ({value:item.id,label:item.name}))) + field('academicYear','Academic year','text','','required') + field('section','Section / class','text','','required');
-    const values = await modalForm('Create student account',content,'Create student');
-    if (!values) return;
-    try { const result = await api('/api/students',{method:'POST',body:values}); await stateRender('students'); await modalForm('Student access code',`<p>Share this fallback code with ${esc(result.student.fullName)} through a secure channel.</p><div class="callout"><code>${esc(result.accessCode)}</code></div>`,'Done'); } catch (error) { toast(error.message); }
+    const data=await api('/api/academics');
+    const courses=data.courses.map(item=>({value:item.id,label:item.name+' · '+item.departmentName,departmentId:item.departmentId,branchIds:item.branchIds}));
+    const branches=data.branches.map(item=>({value:item.id,label:item.name+' · '+item.departmentName,departmentId:item.departmentId,courseIds:item.courseIds}));
+    const content=field('fullName','Full name','text','','required')+field('username','Username','text','','required minlength="3"')+field('password','Initial password','password','','required minlength="12" autocomplete="new-password"')+field('rollNumber','Roll number','text','','required')+field('registrationNumber','Registration number (optional)')+selectField('departmentId','Department',data.departments.map(item=>({value:item.id,label:item.name})),'','required')+linkedSelectField('courseId','Course',courses,'','departmentId','departmentId',true)+linkedSelectField('branchId','Branch (optional)',branches,'','courseId','courseIds')+field('semesterOrdinal','Semester number','number','','required min="1"')+selectField('academicSessionId','Academic session',data.sessions.filter(item=>item.status==='active').map(item=>({value:item.id,label:item.name})))+field('academicYear','Academic year','text','','required')+field('section','Section / class','text','','required');
+    const values=await modalForm('Create student account',content,'Create student');if(!values)return;
+    try{const result=await api('/api/students',{method:'POST',body:values});await stateRender('students');await modalForm('Student access code','<p>Share this fallback code with '+esc(result.student.fullName)+' through a secure channel.</p><div class="callout"><code>'+esc(result.accessCode)+'</code></div>','Done')}catch(error){toast(error.message)}
   }
 
   async function editStudent(id) {
-    const { students } = await api('/api/students'), student = students.find(item => item.id === id);
-    if (!student) return;
-    const data = await api('/api/academics');
-    const content = field('fullName','Full name','text',student.fullName,'required') + field('rollNumber','Roll number','text',student.rollNumber,'required') + field('registrationNumber','Registration number (optional)','text',student.registrationNumber || '') + selectField('departmentId','Department',data.departments.map(item => ({value:item.id,label:item.name})),student.departmentId,'required') + selectField('branchId','Branch',data.branches.map(item => ({value:item.id,label:`${item.name} · ${item.departmentName}`})),student.branchId) + selectField('courseId','Course',data.courses.map(item => ({value:item.id,label:`${item.name} · ${item.departmentName}`})),student.courseId,'required') + field('semesterOrdinal','Semester number','number',student.semesterOrdinal || '','required min="1"') + field('academicYear','Academic year','text',student.academicYear || '','required') + field('section','Section','text',student.section || '','required');
-    const values = await modalForm(`Edit ${student.fullName}`,content);
-    if (!values) return;
-    try { await api(`/api/students/${encodeURIComponent(id)}`,{method:'PATCH',body:values}); toast('Student updated'); await stateRender('students'); } catch (error) { toast(error.message); }
+    const {students}=await api('/api/students'),student=students.find(item=>item.id===id);if(!student)return;const data=await api('/api/academics');
+    const courses=data.courses.map(item=>({value:item.id,label:item.name+' · '+item.departmentName,departmentId:item.departmentId,branchIds:item.branchIds}));
+    const branches=data.branches.map(item=>({value:item.id,label:item.name+' · '+item.departmentName,departmentId:item.departmentId,courseIds:item.courseIds}));
+    const content=field('fullName','Full name','text',student.fullName,'required')+field('rollNumber','Roll number','text',student.rollNumber,'required')+field('registrationNumber','Registration number (optional)','text',student.registrationNumber||'')+selectField('departmentId','Department',data.departments.map(item=>({value:item.id,label:item.name})),student.departmentId,'required')+linkedSelectField('courseId','Course',courses,student.courseId,'departmentId','departmentId',true)+linkedSelectField('branchId','Branch (optional)',branches,student.branchId,'courseId','courseIds')+field('semesterOrdinal','Semester number','number',student.semesterOrdinal||'','required min="1"')+field('academicYear','Academic year','text',student.academicYear||'','required')+field('section','Section','text',student.section||'','required');
+    const values=await modalForm('Edit '+student.fullName,content);if(!values)return;
+    try{await api('/api/students/'+encodeURIComponent(id),{method:'PATCH',body:values});toast('Student updated');await stateRender('students')}catch(error){toast(error.message)}
   }
-
   async function showQrLogin(id) {
     try {
       const issued = await api(`/api/students/${encodeURIComponent(id)}/qr-code`,{method:'POST',body:{}});
@@ -195,10 +198,12 @@
     const signIn = async token => {
       const value = String(token || '').trim();
       if (!/^[A-Za-z0-9_-]{40,60}$/.test(value)) { status.textContent = 'This does not look like a valid Edutrack QR code.'; return; }
+      const submit=dialog.querySelector('[data-qr-submit]');if(submit.disabled)return;const label=submit.textContent;submit.disabled=true;submit.textContent='Signing in…';
       stop();
       status.textContent='Signing in with this one-time QR code…';
       try { const result = await api('/api/login/qr',{method:'POST',body:{token:value}}); state.user=result.user;state.csrf=result.csrf;dialog.close();await original.loadDashboard(); }
       catch (error) { status.textContent=error.message; }
+      finally { if(submit.isConnected){submit.disabled=false;submit.textContent=label;} }
     };
     dialog.querySelector('[data-qr-submit]').addEventListener('click',()=>signIn(dialog.querySelector('#qr-manual').value));
     dialog.querySelector('#qr-image').addEventListener('change',async event=>{
@@ -230,19 +235,15 @@
   async function stateRender(view) { state.view = view; await window.render(); }
 
   async function addRoutine(periodType = 'class') {
-    const data = await api('/api/routines/options');
-    const days = weekdays.map((name,value)=>({value,label:name}));
-    const content = selectField('departmentId','Department',data.departments.map(item=>({value:item.id,label:item.name})),'','required') + selectField('courseId','Course',data.courses.map(item=>({value:item.id,label:item.name}))) + selectField('subjectId','Subject / class group',data.subjects.map(item=>({value:item.id,label:`${item.name} · ${item.code}`})),'','required') + field('semesterName','Semester label','text','','required') + field('section','Section') + selectField('weekday','Day of week',days,String(new Date(`${today()}T00:00:00Z`).getUTCDay()),'required') + field('effectiveFrom','Effective from','date',today(),'required') + field('startsAt','Start time','time','','required') + field('endsAt','End time','time','','required') + field('roomNumber','Room number') + field('facultyName','Teacher / faculty') + textareaField('notes','Notes') + field('periodType','Period type','hidden',periodType);
-    const pending = modalForm(periodType === 'break' ? 'Add a recess' : 'Add a class period',content,periodType === 'break' ? 'Add RECESS' : 'Save period');
-    const subjectSelect = document.querySelector('#dialog [name="subjectId"]');
-    const fillFaculty=()=>{const subject=data.subjects.find(item=>item.id===subjectSelect?.value);const faculty=document.querySelector('#dialog [name="facultyName"]');if(faculty)faculty.value=subject?.facultyName||''};
-    subjectSelect?.addEventListener('change',fillFaculty);fillFaculty();
-    const values = await pending;
-    if (!values) return;
-    try { await api('/api/routines',{method:'POST',body:values});toast(periodType === 'break' ? 'Recess added to the timetable' : 'Class period saved');await stateRender('routines'); }
-    catch (error) { toast(error.message); }
+    const data=await api('/api/routines/options'),days=weekdays.map((name,value)=>({value,label:name}));
+    const courseOptions=data.courses.map(item=>({value:item.id,label:item.name,departmentId:item.departmentId,branchIds:item.branchIds}));
+    const branchOptions=data.branches.map(item=>({value:item.id,label:item.name+' · '+item.departmentName,departmentId:item.departmentId,courseIds:item.courseIds}));
+    const subjectOptions=data.subjects.map(item=>({value:item.id,label:item.name+' · '+item.code+(item.branchName?' · '+item.branchName:''),departmentId:item.departmentId,courseId:item.courseId,branchId:item.branchId,facultyName:item.facultyName}));
+    const content=selectField('departmentId','Department',data.departments.map(item=>({value:item.id,label:item.name})),'','required')+linkedSelectField('courseId','Course',courseOptions,'','departmentId','departmentId')+linkedSelectField('branchId','Branch / timetable group (optional)',branchOptions,'','courseId','courseIds')+linkedSelectField('subjectId','Subject / class group',subjectOptions,'','branchId','branchScope',true,'data-filter-department="departmentId" data-filter-course="courseId"')+field('semesterName','Semester label','text','','required')+field('section','Section')+selectField('weekday','Day of week',days,String(new Date(today()+'T00:00:00Z').getUTCDay()),'required')+field('effectiveFrom','Effective from','date',today(),'required')+field('startsAt','Start time','time','','required')+field('endsAt','End time','time','','required')+field('roomNumber','Room number')+field('facultyName','Teacher / faculty')+textareaField('notes','Notes')+field('periodType','Period type','hidden',periodType);
+    const pending=modalForm(periodType==='break'?'Add a recess':'Add a class period',content,periodType==='break'?'Add RECESS':'Save period'),subjectSelect=document.querySelector('#dialog [name="subjectId"]');
+    const fillFaculty=()=>{const subject=data.subjects.find(item=>item.id===subjectSelect?.value),faculty=document.querySelector('#dialog [name="facultyName"]');if(faculty)faculty.value=subject?.facultyName||''};subjectSelect?.addEventListener('change',fillFaculty);fillFaculty();
+    const values=await pending;if(!values)return;try{await api('/api/routines',{method:'POST',body:values});toast(periodType==='break'?'Recess added to the timetable':'Class period saved');await stateRender('routines')}catch(error){toast(error.message)}
   }
-
   async function viewTeachersForm() {
     const values = await modalForm('Add teacher',field('fullName','Full name','text','','required')+field('username','Username','text','','required minlength="3"')+field('password','Initial password','password','','required minlength="12" autocomplete="new-password"'),'Create teacher');
     if (!values) return;

@@ -8,6 +8,7 @@ const suffix = randomUUID().replaceAll('-', '').slice(0, 8).toLowerCase();
 const owner = { username: `qa_owner_${suffix}`, password: `QAO_${randomUUID()}_local` };
 const teacher = { username: `qa_teacher_${suffix}`, password: `QAT_${randomUUID()}_local` };
 const studentLogin = { username: `qa_student_${suffix}`, password: `QAS_${randomUUID()}_local` };
+const studentBLogin = { username: `qa_student_b_${suffix}`, password: `QASB_${randomUUID()}_local` };
 const moderatorLogin = { username: `qa_mod_${suffix}`, password: `QAM_${randomUUID()}_local` };
 
 async function request(path, { method = 'GET', body, rawBody, contentType, auth } = {}) {
@@ -54,29 +55,55 @@ assert.equal(ownerOnly.response.status, 403, 'Teacher reached owner-only teacher
 
 const department = await request('/api/departments', { method: 'POST', auth: ownerAuth, body: { name: `QA ${suffix}` } });
 assert.equal(department.response.status, 201, 'Owner could not create test department data.');
+const branchA = await request('/api/branches', { method: 'POST', auth: ownerAuth, body: { departmentId: department.result.id, name: `CSE ${suffix}` } });
+const branchB = await request('/api/branches', { method: 'POST', auth: ownerAuth, body: { departmentId: department.result.id, name: `AI & ML ${suffix}` } });
+assert.equal(branchA.response.status, 201, 'Owner could not create the first separate branch.');
+assert.equal(branchB.response.status, 201, 'Owner could not create the second separate branch.');
 const course = await request('/api/courses', {
   method: 'POST', auth: ownerAuth,
-  body: { departmentId: department.result.id, name: `QA Course ${suffix}`, degree: 'QA', semesterCount: 1 }
+  body: { departmentId: department.result.id, branchIds: [branchA.result.id, branchB.result.id], name: `QA Course ${suffix}`, degree: 'QA', semesterCount: 1 }
 });
 assert.equal(course.response.status, 201, 'Owner could not create test course data.');
+const academics = await request('/api/academics', { auth: ownerAuth });
+assert.deepEqual(academics.result.courses.find(item => item.id === course.result.id)?.branchIds?.sort(), [branchA.result.id, branchB.result.id].sort(), 'One course did not retain both separately selectable branches.');
 
 const subject = await request('/api/subjects', {
   method: 'POST', auth: teacherAuth,
-  body: { departmentId: department.result.id, courseId: course.result.id, semesterOrdinal: 1, name: 'QA Attendance', code: `QA${suffix}`, section: 'A', facultyName: 'Local QA Teacher' }
+  body: { departmentId: department.result.id, courseId: course.result.id, branchId: branchA.result.id, semesterOrdinal: 1, name: 'QA Attendance', code: `QA${suffix}`, section: 'A', facultyName: 'Local QA Teacher' }
 });
 assert.equal(subject.response.status, 201, 'Teacher could not create a subject.');
+const subjectBranchB = await request('/api/subjects', {
+  method: 'POST', auth: teacherAuth,
+  body: { departmentId: department.result.id, courseId: course.result.id, branchId: branchB.result.id, semesterOrdinal: 1, name: 'QA Attendance B', code: `QA${suffix}`, section: 'A', facultyName: 'Local QA Teacher' }
+});
+assert.equal(subjectBranchB.response.status, 201, 'The same subject code could not be used in a different branch.');
+const duplicateBranchSubject = await request('/api/subjects', {
+  method: 'POST', auth: teacherAuth,
+  body: { departmentId: department.result.id, courseId: course.result.id, branchId: branchA.result.id, semesterOrdinal: 1, name: 'Duplicate QA Attendance', code: `QA${suffix}`, section: 'A' }
+});
+assert.equal(duplicateBranchSubject.response.status, 409, 'A duplicate subject code in the same branch scope was not rejected.');
+const conflictingSharedSubject = await request('/api/subjects', {
+  method: 'POST', auth: teacherAuth,
+  body: { departmentId: department.result.id, courseId: course.result.id, semesterOrdinal: 1, name: 'Conflicting Shared QA Attendance', code: `QA${suffix}`, section: 'A' }
+});
+assert.equal(conflictingSharedSubject.response.status, 409, 'A shared subject was allowed to conflict with a branch-specific code.');
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 const studentCreated = await request('/api/students', {
   method: 'POST', auth: teacherAuth,
   body: {
     fullName: 'Local QA Student', username: studentLogin.username, password: studentLogin.password,
     rollNumber: `R${suffix}`, registrationNumber: '', departmentId: department.result.id,
-    courseId: course.result.id, semesterOrdinal: 1, academicYear: '2026-27', section: 'A'
+    courseId: course.result.id, branchId: branchA.result.id, semesterOrdinal: 1, academicYear: '2026-27', section: 'A'
   }
 });
 assert.equal(studentCreated.response.status, 201, 'Teacher could not create a student without a registration number.');
 assert.ok(!studentCreated.result.student?.registrationNumber, 'Blank registration number was not stored as optional.');
 assert.ok(studentCreated.result.accessCode, 'New student did not receive a one-time access code.');
+const studentB = await request('/api/students', {
+  method: 'POST', auth: teacherAuth,
+  body: { fullName: 'Local QA Student B', username: studentBLogin.username, password: studentBLogin.password, rollNumber: `RB${suffix}`, registrationNumber: '', departmentId: department.result.id, branchId: branchB.result.id, courseId: course.result.id, semesterOrdinal: 1, academicYear: '2026-27', section: 'A' }
+});
+assert.equal(studentB.response.status, 201, 'Teacher could not assign a student to the second branch.');
 const studentAuth = await login({ ...studentLogin, accessCode: studentCreated.result.accessCode }, 'STUDENT');
 const studentDenied = await request('/api/students', { auth: studentAuth });
 assert.equal(studentDenied.response.status, 403, 'Student reached student-management APIs.');
@@ -107,7 +134,7 @@ const weekday = new Date(`${today}T00:00:00Z`).getUTCDay();
 const routine = await request('/api/routines', {
   method: 'POST', auth: teacherAuth,
   body: {
-    departmentId: department.result.id, courseId: course.result.id, subjectId: subject.result.id,
+    departmentId: department.result.id, courseId: course.result.id, branchId: branchA.result.id, subjectId: subject.result.id,
     semesterName: 'Semester 1', section: 'A', weekday, effectiveFrom: today,
     startsAt: '00:00', endsAt: '00:50', periodType: 'class', roomNumber: 'QA-1'
   }
@@ -116,21 +143,36 @@ assert.equal(routine.response.status, 201, 'Teacher could not add a routine peri
 const recess = await request('/api/routines', {
   method: 'POST', auth: teacherAuth,
   body: {
-    departmentId: department.result.id, courseId: course.result.id, subjectId: subject.result.id,
+    departmentId: department.result.id, courseId: course.result.id, branchId: branchA.result.id, subjectId: subject.result.id,
     semesterName: 'Semester 1', section: 'A', weekday, effectiveFrom: today,
     startsAt: '00:50', endsAt: '01:00', periodType: 'break'
   }
 });
 assert.equal(recess.response.status, 201, 'Teacher could not add a dedicated recess period.');
+const branchBRoutine = await request('/api/routines', {
+  method: 'POST', auth: teacherAuth,
+  body: {
+    departmentId: department.result.id, courseId: course.result.id, branchId: branchB.result.id, subjectId: subjectBranchB.result.id,
+    semesterName: 'Semester 1', section: 'A', weekday, effectiveFrom: today,
+    startsAt: '00:00', endsAt: '00:50', periodType: 'class', roomNumber: 'QA-2'
+  }
+});
+assert.equal(branchBRoutine.response.status, 201, 'The same course could not keep a separate routine for its second branch.');
 const routines = await request('/api/routines', { auth: teacherAuth });
 assert.ok(routines.result.periods?.some(item => item.periodType === 'break' && item.subjectName === 'RECESS'), 'Recess did not persist in the weekly routine.');
 assert.ok(routines.result.periods?.some(item => item.subjectId === subject.result.id && item.facultyName === 'Local QA Teacher'), 'Routine did not use the subject’s assigned teacher.');
+assert.ok(routines.result.periods?.some(item => item.subjectId === subjectBranchB.result.id && item.branchId === branchB.result.id), 'The second branch timetable was not kept separate.');
 
 const enrollment = await request('/api/enrollments', {
   method: 'POST', auth: teacherAuth,
   body: { studentId: studentCreated.result.student.id, subjectId: subject.result.id, startsOn: today }
 });
 assert.equal(enrollment.response.status, 201, 'Teacher could not enroll the student.');
+const wrongBranchEnrollment = await request('/api/enrollments', {
+  method: 'POST', auth: teacherAuth,
+  body: { studentId: studentB.result.student.id, subjectId: subject.result.id, startsOn: today }
+});
+assert.equal(wrongBranchEnrollment.response.status, 400, 'A student from another branch was enrolled in a branch-specific subject.');
 const started = await request('/api/classrooms', {
   method: 'POST', auth: teacherAuth,
   body: { subjectId: subject.result.id, heldOn: today, startsAt: '00:00', endsAt: '23:59', roomNumber: 'QA-1' }
@@ -149,8 +191,12 @@ const ended = await request(`/api/classrooms/${encodeURIComponent(classroomId)}`
 assert.equal(ended.response.status, 200, 'Teacher could not end a classroom.');
 const history = await request(`/api/attendance/history?subjectId=${encodeURIComponent(subject.result.id)}&details=1`, { auth: teacherAuth });
 assert.ok(history.result.records?.some(row => row.studentId === studentCreated.result.student.id && row.status === 'present'), 'Attendance history did not include the saved mark.');
+const otherBranchHistory = await request(`/api/attendance/history?branchId=${encodeURIComponent(branchB.result.id)}&details=1`, { auth: teacherAuth });
+assert.ok(!otherBranchHistory.result.records?.some(row => row.subjectId === subject.result.id), 'Attendance history branch filtering returned a different branch.');
 const reports = await request('/api/reports', { auth: teacherAuth });
 assert.ok(reports.result.subjects?.some(row => row.code === `QA${suffix}` && row.present >= 1), 'Attendance analytics did not include the saved mark.');
+const branchReports = await request(`/api/reports?branchId=${encodeURIComponent(branchB.result.id)}`, { auth: teacherAuth });
+assert.equal(branchReports.result.held, 0, 'Branch report filtering included attendance from a different branch.');
 const studentSummary = await request('/api/student/summary', { auth: studentAuth });
 assert.equal(studentSummary.result.attendance?.attended, 1, 'Student attendance summary did not include the saved mark.');
 
@@ -185,4 +231,4 @@ assert.equal(revokedLogin.response.status, 401, 'A revoked QR login token was ac
 
 const security = await request('/');
 assert.equal(security.response.headers.get('x-frame-options'), 'DENY', 'The app response is missing X-Frame-Options.');
-process.stdout.write('Local API smoke passed: owner, teacher, moderator, and student login; role checks; optional registration; text notice create/read/edit/delete; routines/recess; classroom and attendance; reports; QR issue/use/replay/revoke; and security headers.\n');
+process.stdout.write('Local API smoke passed: owner, teacher, moderator, and student login; role checks; optional registration; multi-branch courses and timetables; branch-scoped subject codes, enrollment, history, and reports; text notice create/read/edit/delete; routines/recess; classroom and attendance; QR issue/use/replay/revoke; and security headers.\n');
