@@ -1,4 +1,4 @@
-const CACHE_NAME = 'edutrack-shell-v6';
+const CACHE_NAME = 'edutrack-shell-v7';
 const SHELL_ASSETS = [
   '/',
   '/styles.css',
